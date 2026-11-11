@@ -8,3 +8,8 @@
 - 검증: (실행한 명령과 결과, 테스트 수)
 - 남은 것 / 다음에 할 것:
 ```
+
+## 회차 1 — L1 펌웨어 컴파일 확인 (업로드 없음) — 완료
+- 바꾼 파일: 없음 (코드 수정 없음). `BACKLOG.md`, `LOG.md`만 갱신.
+- 검증: `tools/servoInitPose`에서 `arduino-cli compile --fqbn esp32:esp32:esp32 --warnings default .` → 오류·경고 없이 완료. 스케치 1,027,095 B (78%, 최대 1,310,720 B), 전역 변수 49,804 B (15%). 이전 기록은 76%였으므로 페이지 증가분(약 21 kB)이 반영된 값이다. `python -m unittest discover tests` 69개 통과.
+- 남은 것 / 다음에 할 것: 플래시 여유 약 284 kB. 업로드는 하지 않았다(사용자 확인 필요 항목). 기본 빌드 경로로 컴파일해서 `tools/servoInitPose/build/`의 이전 바이너리는 그대로다. 다음 항목은 L2.

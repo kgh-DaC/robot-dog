@@ -5,7 +5,7 @@
 
 ## 작업
 
-- [ ] L1. 펌웨어 컴파일 확인 (업로드 없음)
+- [x] L1. 펌웨어 컴파일 확인 (업로드 없음)
   - 범위: `esp32-robot-dog-code-master/tools/servoInitPose/` (코드 수정 없음이 기본)
   - 완료 기준: `arduino-cli compile`이 오류 없이 끝나고, 스케치 크기·사용률을 `LOG.md`에 기록한다. 페이지가 25 kB → 47 kB로 커진 뒤 첫 컴파일이다. 보드 FQBN과 이전 컴파일 방법은 `_workspace/2026-11-09_web-control/01_resume_2026-11-09_qa-fixes.md`에서 찾는다. 찾지 못하면 `[!]`.
 - [ ] L2. 상태 응답에 서 있는 자세 보정값 `standTrimDeg` 추가
