@@ -27,7 +27,8 @@ link "usb"|"wifi", connected, armed, controller "NONE|SERIAL|WIFI", youControl,
 walk "STOPPED|FORWARD|BACKWARD|LEFT|RIGHT", homing, settled, resetReason, lastStop, uptimeMs, leaseTimeoutMs,
 angles {LF|RF|LH|RH: [ALPHA, BETA, GAMMA]}   // 정수 도, 명령 목표각(피드백 아님), 중립 90/45/90
 imu {ready, chip, whoAmI, address, valid, ageMs, accG{x,y,z}, axisDeg{x,y}, zeroed, rollMap, pitchMap, rollDeg, pitchDeg}
-level {enabled, active, sensorUsable, rollCompDeg, pitchCompDeg, gammaOffsetDeg{LF,RF,LH,RH}, maxCompDeg, tiltLimitDeg}standTrimDeg {LF,RF,LH,RH}   // 도. 서 있는 자세 GAMMA 보정. 2026-11-11 이후 펌웨어만 보냄. 없으면 알 수 없음(0 아님)
+level {enabled, active, sensorUsable, rollCompDeg, pitchCompDeg, gammaOffsetDeg{LF,RF,LH,RH}, maxCompDeg, tiltLimitDeg}
+standTrimDeg {LF,RF,LH,RH}   // 도. 서 있는 자세 GAMMA 보정. 2026-11-11 이후 펌웨어만 보냄. 없으면 알 수 없음(0 아님)
 ```
 
 - `angles`에는 수평 보정(`level.gammaOffsetDeg`)과 서 있는 자세 보정(`standTrimDeg`)이 **포함되지 않는다**. 서보에 실제로 나가는 GAMMA = `angles` + `gammaOffsetDeg` + `standTrimDeg`. 직렬 경로에서는 LEVEL 줄의 `trim=` 필드로 오고 게이트웨이가 최상위 `standTrimDeg`로 옮긴다.

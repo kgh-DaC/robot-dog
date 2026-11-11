@@ -12,7 +12,8 @@ import sys
 from pathlib import Path
 
 PROJECT = Path(__file__).resolve().parents[2]
-STATE_NAME = ".ralph-loop.local.md"
+# ralph-loop 1.0.1 writes .claude/ralph-loop.local.md; the dotted name is what its help text says.
+STATE_NAMES = ("ralph-loop.local.md", ".ralph-loop.local.md")
 
 # (pattern, reason) - matched case-insensitively against the shell command.
 BLOCKED = [
@@ -28,10 +29,11 @@ BLOCKED = [
 
 
 def loop_active(cwd: str) -> bool:
-    candidates = [PROJECT / ".claude" / STATE_NAME]
+    roots = [PROJECT]
     if cwd:
         here = Path(cwd)
-        candidates += [p / ".claude" / STATE_NAME for p in (here, *here.parents)]
+        roots += [here, *here.parents]
+    candidates = [root / ".claude" / name for root in roots for name in STATE_NAMES]
     return any(p.is_file() for p in candidates)
 
 
@@ -50,7 +52,7 @@ def main() -> int:
             message = (
                 "루프 실행 중 차단: " + reason + ". 실물 로봇 동작·펌웨어 업로드·직렬 포트 작업은 "
                 "루프에서 하지 않는다. _workspace/loop/BACKLOG.md의 '사용자 확인 필요'에 적고 다음 항목으로 넘어간다. "
-                "(사용자가 /cancel-ralph로 루프를 끝낸 뒤 직접 승인하면 할 수 있다.)"
+                "(사용자가 /ralph-loop:cancel-ralph로 루프를 끝낸 뒤 직접 승인하면 할 수 있다.)"
             )
             json.dump({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
                                               "permissionDecisionReason": message}},

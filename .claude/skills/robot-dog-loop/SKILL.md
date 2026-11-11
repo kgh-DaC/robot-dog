@@ -1,6 +1,6 @@
 ---
 name: robot-dog-loop
-description: 로봇개 루프 하네스. Ralph Loop(/ralph-loop)로 같은 지시를 반복 실행하면서 작업 목록(_workspace/loop/BACKLOG.md)의 항목을 하나씩 구현·검증·기록한다. 루프 시작, 루프 회차 진행, 작업 목록 추가·정리, 루프 결과 확인 요청에 사용한다.
+description: 로봇개 루프 하네스. Ralph Loop(/ralph-loop:ralph-loop)로 같은 지시를 반복 실행하면서 작업 목록(_workspace/loop/BACKLOG.md)의 항목을 하나씩 구현·검증·기록한다. 루프 시작, 루프 회차 진행, 작업 목록 추가·정리, 루프 결과 확인 요청에 사용한다.
 ---
 
 # 로봇개 루프 하네스
@@ -52,8 +52,9 @@ description: 로봇개 루프 하네스. Ralph Loop(/ralph-loop)로 같은 지�
 
 ## 시작과 중단
 
-- 시작: `_workspace/loop/LOOP_PROMPT.md`의 `/ralph-loop ...` 명령을 그대로 입력한다. `--max-iterations`를 반드시 둔다.
-- 중단: `/cancel-ralph`. 중단 후에는 훅이 풀려서 사용자 승인으로 실물 작업을 할 수 있다.
+- 시작: `_workspace/loop/LOOP_PROMPT.md`의 `/ralph-loop:ralph-loop ...` 명령을 그대로 입력한다(플러그인 명령은 `플러그인:명령` 형식이라 `/ralph-loop`만 쓰면 Unknown command). `--max-iterations`를 반드시 둔다. 반복 훅은 `jq`가 설치돼 있어야 동작한다.
+- 루프 상태 파일은 `.claude/ralph-loop.local.md`다. 안전 훅은 이 파일이 있을 때만 막는다.
+- 중단: `/ralph-loop:cancel-ralph`. 중단 후에는 훅이 풀려서 사용자 승인으로 실물 작업을 할 수 있다.
 - 루프가 끝나면 `LOG.md`와 "사용자 확인 필요"를 사용자에게 요약해 보고한다. 소프트웨어 테스트 통과를 실물 검증으로 표현하지 않는다.
 
 ## 되돌리기

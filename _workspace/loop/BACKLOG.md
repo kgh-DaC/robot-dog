@@ -12,7 +12,7 @@
   - 범위: `servoInitPose.ino`(직렬 `STATUS`), `web_control.ino`(Wi-Fi JSON, 버퍼 최악 길이 재계산), `usb_gateway.py`, `tests/test_usb_gateway.py`
   - 완료 기준: 두 경로 모두 `standTrimDeg {LF,RF,LH,RH}`(도)를 내보내고, 필드가 없는 옛 펌웨어 응답에서도 게이트웨이가 오류 없이 동작한다(필드 생략). 테스트 추가, 전체 통과, 컴파일 통과.
   - 참고: `.claude/skills/robot-digital-twin/references/kinematic-model.md` "어떤 각도를 그릴 것인가"
-- [ ] L3. 관절 모형에 서 있는 자세 보정 반영
+- [~] L3. 관절 모형에 서 있는 자세 보정 반영
   - 범위: `software/robot_control_web/index.html`, `tests/page_harness.js`, `tests/test_control_page.py`
   - 완료 기준: `standTrimDeg`가 있으면 "보정 포함"일 때 GAMMA에 더하고, 없으면 더하지 않고 안내 문구에 "미포함"을 유지한다. 표에 보정 출처가 드러난다. 테스트 추가(있음/없음 두 경우), 전체 통과, `web_page.h` 재생성.
   - 의존: L2
