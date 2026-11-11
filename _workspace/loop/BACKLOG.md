@@ -25,6 +25,13 @@
 - [ ] L6. 사용 설명 갱신
   - 범위: `esp32-robot-dog-code-master/software/usb_gateway/README.md`
   - 완료 기준: "관절 모형"과 "수평 유지 켜짐/꺼짐 비교" 사용법, 표현 한계(명령 각도 기준, 4 Hz, 바닥 접촉 미표현)를 한국어로 추가한다. 기존 안전 규칙 절은 바꾸지 않는다.
+- [ ] L7. 그리기 오류가 나도 오래된 상태 표시가 갱신되게 하기 (L5에서 발견, 낮음)
+  - 범위: `software/robot_control_web/index.html`의 `render()`, `tests/page_harness.js`, `tests/test_control_page.py`
+  - 완료 기준: 연결이 끊긴 상태에서 `renderModel` 또는 `renderCompare`가 예외를 던져도 `sArmed`·`sWalk` 등이 "알 수 없음"으로 바뀐다(상태 글자 갱신을 그리기 호출보다 먼저 하거나 그리기를 예외로부터 분리). 하네스에서 캔버스가 예외를 던지는 경우를 추가해 검증. 버튼 비활성화·하트비트·정지 코드는 바꾸지 않는다. 전체 통과, `web_page.h` 재생성.
+- [ ] L8. 수평 보정값이 없을 때 "보정 포함"이 0으로 가정하지 않고 알 수 없음을 표시 (L5에서 발견, 낮음)
+  - 범위: `index.html`의 `modelAngles`·`renderModel` 안내 줄, `tests/page_harness.js`, `tests/test_control_page.py`
+  - 완료 기준: 상태 응답에 `level.gammaOffsetDeg`가 없거나 숫자가 아니면 안내 줄에 "수평 보정: 알 수 없음"이 나오고, 값이 있으면 지금과 같다. 테스트 추가(있음/없음), 전체 통과, `web_page.h` 재생성.
+  - 참고: `.claude/skills/robot-digital-twin/references/kinematic-model.md` "값이 없으면 0으로 가정하지 말고"
 
 ## 사용자 확인 필요
 
