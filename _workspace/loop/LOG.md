@@ -51,3 +51,9 @@
 - 바꾼 파일: `software/usb_gateway/README.md`. "수평 유지 켜짐/꺼짐 비교"와 "관절 모형" 두 절을 "기울기 센서와 수평 유지" 절 뒤에 추가(사용법, 기록 규칙, 표현 한계: 명령 각도 기준, 4 Hz, 바닥 접촉 미표현). API 절의 상태 응답 목록에 `standTrimDeg` 한 줄 추가(L2에서 생긴 필드).
 - 검증: `git diff`에서 지워진 줄은 API 목록의 한 줄(끝에 쉼표를 붙여 다시 쓴 것)뿐이고, 안전 규칙 절 두 곳은 그대로다. 설명의 숫자(20표본, 1초 제외, 60초, 치수)는 `index.html`의 상수와 대조했다. `python -m unittest discover tests` 78개 통과(코드 변경 없음).
 - 남은 것 / 다음에 할 것: README의 "테스트" 절은 `python -m pytest -q tests`로 적혀 있고 루프는 `unittest`로 실행한다(둘 다 같은 테스트, 고치지 않음). 다음 항목은 L7.
+
+## 회차 7 — L7 그리기 오류가 나도 오래된 상태 표시가 갱신되게 하기 — 완료
+- 바꾼 파일: `software/robot_control_web/index.html`(`render()`), `tools/servoInitPose/web_page.h`(재생성, 48.1 kB), `tests/page_harness.js`, `tests/test_control_page.py`(테스트 1개 추가).
+- 동작: `render()`가 상태 글자("알 수 없음" 또는 현재 값)를 먼저 쓰고, 그 뒤에 `renderLevel`·`renderCompare`·`renderModel`을 각각 따로 감싸서 부른다. 하나가 예외를 던져도 나머지 카드는 갱신되고, 예외는 `console.error`로 남긴다. 버튼 비활성화, 하트비트, 정지 코드는 건드리지 않았다.
+- 검증: `embed_page.py` 실행 후 `python -m unittest discover tests` 79개 통과(78 + 1). 새 테스트는 관절 모형과 비교 그래프 캔버스가 예외를 던지게 한 뒤 연결을 끊고, 상태 글자·센서 표시·관절 표가 "알 수 없음"/빈 값으로 바뀌고 버튼이 비활성으로 남는지 본다. 수정 전 페이지(HEAD)로 같은 하네스를 돌리면 예외가 밖으로 나와 하네스가 중단된다(테스트 실패에 해당).
+- 남은 것 / 다음에 할 것: 펌웨어 컴파일은 이번 회차에 다시 하지 않았다(내장 페이지 문자열이 약 0.3 kB 늘었을 뿐, L2에서 78%). 보드에는 여전히 옛 페이지다(업로드는 사용자 확인 필요). 다음 항목은 L8.

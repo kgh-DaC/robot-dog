@@ -217,5 +217,19 @@ const snapshot = () => ({ armed: el("sArmed").textContent, walk: el("sWalk").tex
   report.cmpSettle = { rows: fwdOffRows(), view: cmpView() };
   await advance(70000);                  // same segment kept running past the 60 s window
   report.cmpWindow = { rows: fwdOffRows(), view: cmpView() };
+
+  // ---- a drawing failure must not freeze the status text ------------------------
+  const boom = () => { throw new Error("canvas failure"); };
+  const savedCtx = ["mdCanvas", "cmpRoll"].map((id) => [id, el(id).getContext]);
+  savedCtx.forEach(([id]) => { el(id).getContext = boom; });
+  sim.walk = "LEFT";
+  await advance(1000);
+  report.drawFail = { fresh: snapshot() };
+  statusMode = "fail";
+  await advance(2500);
+  report.drawFail.stale = snapshot();
+  report.drawFail.staleTrim = el("mdTrim").textContent;
+  statusMode = "ok";
+  savedCtx.forEach(([id, fn]) => { el(id).getContext = fn; });
   process.stdout.write(JSON.stringify(report));
 })();

@@ -41,6 +41,21 @@ class ControlPageTests(unittest.TestCase):
                 self.assertTrue(view["fwd"])
                 self.assertIn("연결 끊김", view["link"])
 
+    def test_drawing_failure_does_not_freeze_the_status_text(self):
+        # The model and comparison canvases throw; the status text must still follow the state.
+        fresh, stale = self.report["drawFail"]["fresh"], self.report["drawFail"]["stale"]
+        self.assertEqual(fresh["armed"], "활성 (이 페이지)")
+        self.assertEqual(fresh["walk"], "왼쪽")
+        self.assertEqual(stale["armed"], "알 수 없음")
+        self.assertEqual(stale["walk"], "알 수 없음")
+        self.assertIn("연결 끊김", stale["link"])
+        self.assertTrue(stale["arm"])                        # controls stay disabled
+        self.assertTrue(stale["fwd"])
+        self.assertEqual(stale["sensor"], "센서 알 수 없음")   # the cards after the failing one still update
+        self.assertEqual(stale["roll"], "알 수 없음")
+        self.assertNotIn("<td>90</td>", stale["joints"])
+        self.assertEqual(self.report["drawFail"]["staleTrim"], "")
+
 
 @unittest.skipUnless(NODE, "node is not installed")
 class LevelMonitorTests(unittest.TestCase):

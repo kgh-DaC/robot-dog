@@ -260,20 +260,22 @@ td small{color:var(--muted)}
       $("wifiCard").hidden = false;
       $("wifiInfo").textContent = "SSID " + state.wifi.ssid + " / 비밀번호 " + state.wifi.password + " / http://192.168.4.1";
     }
-    renderLevel(fresh);
-    renderCompare(fresh);
-    renderModel(fresh);
     if (!fresh) {
       ["sArmed", "sCtrl", "sWalk", "sSettled"].forEach(function (id) { $(id).textContent = "알 수 없음"; });
       ["sStop", "sReset"].forEach(function (id) { $(id).textContent = "-"; });
-      return;
+    } else {
+      $("sArmed").textContent = state.armed ? (state.youControl ? "활성 (이 페이지)" : "활성 (다른 장치)") : "비활성";
+      $("sCtrl").textContent = CTRL_KO[state.controller] || state.controller;
+      $("sWalk").textContent = (DIR_KO[state.walk] || state.walk) + (state.homing ? " · 시작 자세 복귀 중" : "");
+      $("sSettled").textContent = state.settled ? "저장됨" : "이동 중";
+      $("sStop").textContent = state.lastStop ? (STOP_KO[state.lastStop] ? STOP_KO[state.lastStop] + " (" + state.lastStop + ")" : state.lastStop) : "-";
+      $("sReset").textContent = state.resetReason || "-";
     }
-    $("sArmed").textContent = state.armed ? (state.youControl ? "활성 (이 페이지)" : "활성 (다른 장치)") : "비활성";
-    $("sCtrl").textContent = CTRL_KO[state.controller] || state.controller;
-    $("sWalk").textContent = (DIR_KO[state.walk] || state.walk) + (state.homing ? " · 시작 자세 복귀 중" : "");
-    $("sSettled").textContent = state.settled ? "저장됨" : "이동 중";
-    $("sStop").textContent = state.lastStop ? (STOP_KO[state.lastStop] ? STOP_KO[state.lastStop] + " (" + state.lastStop + ")" : state.lastStop) : "-";
-    $("sReset").textContent = state.resetReason || "-";
+    // Monitors and drawings come last and are isolated from each other: a failure
+    // in one must not leave the status text above or the other cards showing old values.
+    [renderLevel, renderCompare, renderModel].forEach(function (fn) {
+      try { fn(fresh); } catch (e) { if (typeof console !== "undefined" && console.error) console.error(e); }
+    });
   }
 
   // One status request at a time; a hung request is aborted after 1.5 s.
