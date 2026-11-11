@@ -143,6 +143,23 @@ class JointModelTests(unittest.TestCase):
         self.assertIsNone(self.fk["missing"]["LF"])
         self.assertIsNone(self.fk["missing"]["RF"])
 
+    def test_stand_trim_is_added_only_when_reported_and_requested(self):
+        self.assertEqual(self.fk["withTrim"]["LF"], [90, 45, 97])     # 90 - 2 (level) + 9 (trim)
+        self.assertEqual(self.fk["withTrim"]["RH"], [90, 45, 83])     # 90 + 2 - 9
+        self.assertEqual(self.fk["trimNoCorr"]["LF"], [90, 45, 90])
+        self.assertEqual(self.fk["badTrim"]["LF"], [90, 45, 88])      # incomplete trim = unknown, not used
+        model = self.report["model"]
+        self.assertIn("알 수 없음", model["trimNoteOld"])
+        self.assertIn("포함되지 않습니다", model["trimNoteOld"])
+        self.assertIn("LF +9.0°", model["trimNoteNew"])
+        self.assertIn("RH -9.0°", model["trimNoteNew"])
+        self.assertIn("모형에 포함됨", model["trimNoteNew"])
+        self.assertIn("넣지 않음", model["trimNoteOff"])
+        self.assertIn("→ 97.0", model["jointsWithTrim"])
+        for text in (model["trimNoteOld"], model["trimNoteNew"], model["trimNoteOff"], model["jointsWithTrim"]):
+            self.assertNotIn("NaN", text)
+            self.assertNotIn("undefined", text)
+
     def test_model_and_table_show_all_legs(self):
         self.assertGreater(self.report["model"]["lines"], 20)
         for html in (self.report["model"]["joints"], self.report["model"]["outOfRange"]):

@@ -172,14 +172,15 @@ td small{color:var(--muted)}
       <canvas id="mdCanvas" role="img" aria-label="관절 각도로 그린 네 다리 모형"></canvas>
     </div>
     <div class="seg" style="margin:8px 0">
-      <button id="mdCorr">수평 보정 포함</button>
+      <button id="mdCorr">보정 포함</button>
       <button id="mdGhost">중립 자세 겹쳐 보기</button>
     </div>
     <div class="scroll"><table>
       <thead><tr><th>다리</th><th>ALPHA</th><th>BETA</th><th>GAMMA</th><th>무릎 x, y, z (mm)</th><th>발 x, y, z (mm)</th></tr></thead>
       <tbody id="joints"></tbody>
     </table></div>
-    <p class="note">명령한 관절 목표각(도)으로 계산한 모형입니다. 몸통은 고정이고 다리 모양만 보여 주며, 바닥에 닿았는지는 나타내지 않습니다. 서보에는 위치 피드백이 없어 실제 자세와 다를 수 있습니다. 좌표는 몸통 중심 기준입니다 (x 오른쪽, y 앞, z 위). 3D 보기는 끌어서 돌릴 수 있습니다. 치수: 윗다리 51.9 mm, 아랫다리 50 mm, 좌우 어깨 간격 80 mm, 앞뒤 어깨 간격 141 mm(미실측). 서 있는 자세 보정값(다리별 GAMMA 보정)은 포함되지 않습니다.</p>
+    <p class="note">명령한 관절 목표각(도)으로 계산한 모형입니다. 몸통은 고정이고 다리 모양만 보여 주며, 바닥에 닿았는지는 나타내지 않습니다. 서보에는 위치 피드백이 없어 실제 자세와 다를 수 있습니다. 좌표는 몸통 중심 기준입니다 (x 오른쪽, y 앞, z 위). 3D 보기는 끌어서 돌릴 수 있습니다. 치수: 윗다리 51.9 mm, 아랫다리 50 mm, 좌우 어깨 간격 80 mm, 앞뒤 어깨 간격 141 mm(미실측). “보정 포함”은 수평 유지 보정과 서 있는 자세 보정(다리별 GAMMA)을 더한, 서보에 실제로 보내는 각도입니다.</p>
+    <p class="note" id="mdTrim"></p>
   </section>
 
   <section class="card" id="wifiCard" hidden>
@@ -434,14 +435,24 @@ td small{color:var(--muted)}
     return { hip: hip, knee: at(ku, kd), foot: at(fu, fd) };
   }
   function isNum(v) { return typeof v === "number" && isFinite(v); }
-  // Commanded angles per leg; withCorr adds the leveling GAMMA offset. null = unknown.
+  // Standing-pose GAMMA trim per leg, or null when the firmware does not report it
+  // (older firmware). Unknown is never treated as zero in the text shown to the user.
+  function standTrim(s) {
+    var t = s && s.standTrimDeg;
+    if (!t) return null;
+    for (var i = 0; i < LEG_IDS.length; i++) if (!isNum(t[LEG_IDS[i]])) return null;
+    return t;
+  }
+  // Commanded angles per leg; withCorr adds the leveling GAMMA offset and the
+  // standing-pose trim (the angle really sent to the servo). null = unknown.
   function modelAngles(s, withCorr) {
+    var trim = withCorr ? standTrim(s) : null;
     var out = {};
     LEG_IDS.forEach(function (leg) {
       var a = s && s.angles && s.angles[leg];
       if (!a || a.length !== 3 || !isNum(a[0]) || !isNum(a[1]) || !isNum(a[2])) { out[leg] = null; return; }
       var off = withCorr && s.level && s.level.gammaOffsetDeg ? s.level.gammaOffsetDeg[leg] : 0;
-      out[leg] = [a[0], a[1], a[2] + (isNum(off) ? off : 0)];
+      out[leg] = [a[0], a[1], a[2] + (isNum(off) ? off : 0) + (trim ? trim[leg] : 0)];
     });
     return out;
   }
@@ -464,6 +475,11 @@ td small{color:var(--muted)}
         mm(p.foot[0]) + ", " + mm(p.foot[1]) + ", " + mm(p.foot[2]) + "</td></tr>";
     });
     $("joints").innerHTML = rows;
+    var trim = fresh ? standTrim(state) : null;
+    $("mdTrim").textContent = !fresh ? "" : trim ?
+      "서 있는 자세 보정: " + LEG_IDS.map(function (leg) { return leg + " " + fmtDeg(trim[leg]); }).join(", ") +
+      (md.corr ? " (모형에 포함됨)" : " (보정 포함을 끄면 모형에 넣지 않음)") :
+      "서 있는 자세 보정: 알 수 없음 — 이 펌웨어는 값을 보내지 않아 모형에 포함되지 않습니다.";
     drawModel(angles);
   }
   function drawModel(angles) {
@@ -714,7 +730,7 @@ td small{color:var(--muted)}
       canvas.addEventListener("pointerleave", function () { cmp.hover = null; render(); });
     });
   })();
-  window.RobotTwin = { geo: GEO, fkLeg: fkLeg, modelAngles: modelAngles, cmpStats: cmpStats, cmpCsv: cmpCsv };
+  window.RobotTwin = { geo: GEO, fkLeg: fkLeg, modelAngles: modelAngles, standTrim: standTrim, cmpStats: cmpStats, cmpCsv: cmpCsv };
 
   setInterval(poll, 250);
   setInterval(render, 500);

@@ -45,7 +45,7 @@ Object.keys(draw2).forEach((id) => Object.assign(el(id), {
 
 let statusMode = "ok";       // ok | fail | hang
 // Overrides for the model and comparison scenarios (null = default value).
-const sim = { levelEnabled: true, levelActive: true, roll: null, pitch: null, walk: "FORWARD", armed: true, gamma: 90 };
+const sim = { levelEnabled: true, levelActive: true, roll: null, pitch: null, walk: "FORWARD", armed: true, gamma: 90, trim: null };
 let imuMapped = true;
 const posts = [];
 const okStatus = () => ({
@@ -59,6 +59,7 @@ const okStatus = () => ({
     pitchDeg: imuMapped ? (sim.pitch === null ? 1.25 : sim.pitch) : null },
   level: { enabled: sim.levelEnabled, active: sim.levelActive, sensorUsable: true, rollCompDeg: 1.5, pitchCompDeg: -0.5,
     gammaOffsetDeg: { LF: -2, RF: 1, LH: -1, RH: 2 }, maxCompDeg: 6, tiltLimitDeg: 20 },
+  ...(sim.trim ? { standTrimDeg: sim.trim } : {}),     // older firmware: field absent
 });
 const response = (obj) => ({ json: () => Promise.resolve(obj), status: 200 });
 
@@ -156,6 +157,20 @@ const snapshot = () => ({ armed: el("sArmed").textContent, walk: el("sWalk").tex
     withCorr: T.modelAngles(okStatus(), true), noCorr: T.modelAngles(okStatus(), false),
     missing: T.modelAngles({ angles: { LF: [90, 45, null] } }, true),
   };
+  report.model.trimNoteOld = el("mdTrim").textContent;          // firmware without standTrimDeg
+  sim.trim = { LF: 9, RF: 1, LH: -1, RH: -9 };
+  await advance(600);
+  report.model.trimNoteNew = el("mdTrim").textContent;
+  report.model.jointsWithTrim = el("joints").innerHTML;
+  report.fk.withTrim = T.modelAngles(okStatus(), true);
+  report.fk.trimNoCorr = T.modelAngles(okStatus(), false);
+  report.fk.badTrim = T.modelAngles(Object.assign(okStatus(), { standTrimDeg: { LF: 9, RF: 1, LH: null, RH: -9 } }), true);
+  el("mdCorr").onclick();                 // corrections off
+  await advance(100);
+  report.model.trimNoteOff = el("mdTrim").textContent;
+  el("mdCorr").onclick();                 // back on
+  sim.trim = null;
+  await advance(600);
   sim.gamma = 170;                       // above the firmware limit: still drawn, no NaN
   await advance(600);
   report.model.outOfRange = el("joints").innerHTML;
