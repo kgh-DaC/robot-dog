@@ -212,11 +212,17 @@ const char *levelSet(bool on, bool sourceOwnsControl)
 
 void printLevel()
 {
+  // trim= is the fixed standing-pose GAMMA trim (LF/RF/LH/RH, deg) that the
+  // firmware adds to every commanded GAMMA; the digital twin needs it to draw
+  // the angle that is really sent to the servo. Appended last so older
+  // gateways that do not know the field keep working.
   Serial.printf("LEVEL enabled=%d active=%d sensor=%d rollcomp=%.2f pitchcomp=%.2f "
-                "offsets=%.2f/%.2f/%.2f/%.2f max=%.1f limit=%.1f\n",
+                "offsets=%.2f/%.2f/%.2f/%.2f max=%.1f limit=%.1f trim=%.1f/%.1f/%.1f/%.1f\n",
                 levelEnabled ? 1 : 0, levelActive() ? 1 : 0, levelSensorUsable() ? 1 : 0,
                 levelRollComp, levelPitchComp, levelOffsetDeg[2], levelOffsetDeg[5],
-                levelOffsetDeg[8], levelOffsetDeg[11], LEVEL_MAX_COMP_DEG, LEVEL_TILT_LIMIT_DEG);
+                levelOffsetDeg[8], levelOffsetDeg[11], LEVEL_MAX_COMP_DEG, LEVEL_TILT_LIMIT_DEG,
+                STAND_GAMMA_TRIM_DEG[0], STAND_GAMMA_TRIM_DEG[1], STAND_GAMMA_TRIM_DEG[2],
+                STAND_GAMMA_TRIM_DEG[3]);
 }
 
 void formatLevelJson(char *out, size_t size)

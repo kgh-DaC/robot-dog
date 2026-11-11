@@ -38,6 +38,7 @@ class FakeFirmware:
         self.walk = "STOPPED"
         self.homing = False
         self.level = False
+        self.trim_field = " trim=9.0/1.0/-1.0/-9.0"   # "" models firmware before the field existed
         self.stop_reason = "boot"
         self.lease_deadline = 0.0
         self.settled_after = 0
@@ -98,7 +99,8 @@ class FakeFirmware:
         if cmd == "LEVEL":
             if len(parts) == 1:
                 return [f"LEVEL enabled={int(self.level)} active={int(self.level and self.armed)} sensor=1 "
-                        "rollcomp=1.50 pitchcomp=-0.50 offsets=-2.00/1.00/-1.00/2.00 max=6.0 limit=20.0"]
+                        "rollcomp=1.50 pitchcomp=-0.50 offsets=-2.00/1.00/-1.00/2.00 max=6.0 limit=20.0"
+                        + self.trim_field]
             if self.armed and self.ctrl != "SERIAL":
                 return ["ERR controlled_by_other"]
             if parts[1] == "ON" and not self.armed:
@@ -272,6 +274,35 @@ class RobotLinkTests(unittest.TestCase):
         self.assertEqual((imu["rollMap"], imu["pitchMap"]), ("+X", "-Y"))
         self.assertEqual(level["gammaOffsetDeg"], {"LF": -2.0, "RF": 1.0, "LH": -1.0, "RH": 2.0})
         self.assertEqual((level["tiltLimitDeg"], level["maxCompDeg"]), (20.0, 6.0))
+
+    def test_stand_trim_is_reported_when_the_firmware_sends_it(self):
+        link, _ = make_link()
+        self.assertEqual(link.status(OWNER)["standTrimDeg"], {"LF": 9.0, "RF": 1.0, "LH": -1.0, "RH": -9.0})
+
+    def test_stand_trim_is_omitted_for_older_firmware(self):
+        link, fw = make_link()
+        fw.trim_field = ""                          # firmware before the trim= field
+        status = link.status(OWNER)
+        self.assertNotIn("standTrimDeg", status)    # unknown, not zero
+        self.assertNotIn("error", status)
+        self.assertEqual(status["level"]["gammaOffsetDeg"]["LF"], -2.0)
+
+    def test_malformed_stand_trim_is_treated_as_unknown(self):
+        from usb_gateway import parse_stand_trim
+        self.assertIsNone(parse_stand_trim("LEVEL enabled=0 trim=9.0/1.0/-1.0"))
+        self.assertIsNone(parse_stand_trim("LEVEL enabled=0 trim=9.0/x/-1.0/-9.0"))
+        self.assertIsNone(parse_stand_trim("LEVEL enabled=0 trim=-/-/-/-"))
+        self.assertEqual(parse_stand_trim("LEVEL enabled=0 trim=0.0/0.0/0.0/0.0"),
+                         {"LF": 0.0, "RF": 0.0, "LH": 0.0, "RH": 0.0})
+
+    def test_firmware_sends_stand_trim_on_both_links(self):
+        sketch = ROOT / "esp32-robot-dog-code-master" / "tools" / "servoInitPose"
+        level = (sketch / "level_control.ino").read_text(encoding="utf-8")
+        web = (sketch / "web_control.ino").read_text(encoding="utf-8")
+        self.assertIn("trim=%.1f/%.1f/%.1f/%.1f", level)
+        self.assertIn('\\"standTrimDeg\\":%s', web)
+        for text in (level, web):
+            self.assertIn("STAND_GAMMA_TRIM_DEG[3]", text)
 
     def test_unknown_imu_values_become_null(self):
         from usb_gateway import parse_imu_line

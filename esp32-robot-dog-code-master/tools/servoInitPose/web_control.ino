@@ -143,7 +143,7 @@ void handleStatus()
   const String session = webServer.arg("session");
   const bool sessionValid = validSession(session);
   const int clients = WiFi.softAPgetStationNum();  // outside the lock
-  char body[1536];  // worst case ~1.1 kB with the IMU and level objects
+  char body[1536];  // worst case ~1.2 kB with the IMU, level and standTrimDeg objects
   {
     ControlLock lock;
     const bool youControl = sessionValid && sessionOwnsControl(session);
@@ -158,16 +158,20 @@ void handleStatus()
              servos[3].targetAngle, servos[4].targetAngle, servos[5].targetAngle,
              servos[6].targetAngle, servos[7].targetAngle, servos[8].targetAngle,
              servos[9].targetAngle, servos[10].targetAngle, servos[11].targetAngle);
+    char trim[96];  // worst case 58 B: {"LF":-99.9,"RF":-99.9,"LH":-99.9,"RH":-99.9}
+    snprintf(trim, sizeof(trim), "{\"LF\":%.1f,\"RF\":%.1f,\"LH\":%.1f,\"RH\":%.1f}",
+             STAND_GAMMA_TRIM_DEG[0], STAND_GAMMA_TRIM_DEG[1], STAND_GAMMA_TRIM_DEG[2],
+             STAND_GAMMA_TRIM_DEG[3]);
     snprintf(body, sizeof(body),
              "{\"link\":\"wifi\",\"connected\":true,\"armed\":%s,\"controller\":\"%s\","
              "\"youControl\":%s,\"walk\":\"%s\",\"homing\":%s,\"settled\":%s,"
              "\"resetReason\":\"%s\",\"lastStop\":\"%s\",\"uptimeMs\":%lu,"
-             "\"leaseTimeoutMs\":%u,\"angles\":%s,\"wifi\":{\"ssid\":\"%s\",\"clients\":%d},\"imu\":%s,\"level\":%s}",
+             "\"leaseTimeoutMs\":%u,\"angles\":%s,\"wifi\":{\"ssid\":\"%s\",\"clients\":%d},\"imu\":%s,\"level\":%s,\"standTrimDeg\":%s}",
              armed ? "true" : "false", controllerName(controller),
              youControl ? "true" : "false", walkName(walkDirection),
              startupHoming ? "true" : "false", poseSettledAndSaved() ? "true" : "false",
              resetReasonName(), lastStopReason, (unsigned long)millis(),
-             (unsigned)LEASE_TIMEOUT_MS, angles, wifiSsid, clients, imuJson, levelJson);
+             (unsigned)LEASE_TIMEOUT_MS, angles, wifiSsid, clients, imuJson, levelJson, trim);
   }
   sendNoStoreHeaders();
   webServer.send(200, "application/json", body);

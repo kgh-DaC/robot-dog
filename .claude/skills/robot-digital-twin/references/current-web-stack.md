@@ -27,10 +27,10 @@ link "usb"|"wifi", connected, armed, controller "NONE|SERIAL|WIFI", youControl,
 walk "STOPPED|FORWARD|BACKWARD|LEFT|RIGHT", homing, settled, resetReason, lastStop, uptimeMs, leaseTimeoutMs,
 angles {LF|RF|LH|RH: [ALPHA, BETA, GAMMA]}   // 정수 도, 명령 목표각(피드백 아님), 중립 90/45/90
 imu {ready, chip, whoAmI, address, valid, ageMs, accG{x,y,z}, axisDeg{x,y}, zeroed, rollMap, pitchMap, rollDeg, pitchDeg}
-level {enabled, active, sensorUsable, rollCompDeg, pitchCompDeg, gammaOffsetDeg{LF,RF,LH,RH}, maxCompDeg, tiltLimitDeg}
+level {enabled, active, sensorUsable, rollCompDeg, pitchCompDeg, gammaOffsetDeg{LF,RF,LH,RH}, maxCompDeg, tiltLimitDeg}standTrimDeg {LF,RF,LH,RH}   // 도. 서 있는 자세 GAMMA 보정. 2026-11-11 이후 펌웨어만 보냄. 없으면 알 수 없음(0 아님)
 ```
 
-- `angles`에는 수평 보정(`level.gammaOffsetDeg`)과 서 있는 자세 보정(`STAND_GAMMA_TRIM_DEG`, 현재 상태 응답에 없음)이 **포함되지 않는다**. 서보에 실제로 나가는 GAMMA = `angles` + `gammaOffsetDeg` + 자세 보정.
+- `angles`에는 수평 보정(`level.gammaOffsetDeg`)과 서 있는 자세 보정(`standTrimDeg`)이 **포함되지 않는다**. 서보에 실제로 나가는 GAMMA = `angles` + `gammaOffsetDeg` + `standTrimDeg`. 직렬 경로에서는 LEVEL 줄의 `trim=` 필드로 오고 게이트웨이가 최상위 `standTrimDeg`로 옮긴다.
 - 펌웨어 상태 본문 버퍼는 1536 B(`handleStatus`), IMU 360 B, level 320 B. 필드를 추가하면 최악 길이를 다시 계산한다.
 - 게이트웨이는 같은 필드를 직렬 `STATUS` 응답에서 만들어 준다. 필드를 추가하면 펌웨어(직렬+Wi-Fi), 게이트웨이, 페이지, 테스트를 함께 바꾼다.
 - roll: + = 오른쪽이 낮음, pitch: + = 앞쪽이 낮음. `rollMap`/`pitchMap`이 `NONE`이면 roll/pitch가 아니라 센서 축 값이다.

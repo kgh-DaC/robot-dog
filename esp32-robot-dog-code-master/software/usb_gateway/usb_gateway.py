@@ -103,6 +103,17 @@ def parse_level_line(line: str) -> dict:
     }
 
 
+def parse_stand_trim(line: str) -> dict | None:
+    """Standing-pose GAMMA trim (deg) from the ``trim=`` field of the LEVEL line.
+
+    Older firmware does not send it: the result is None and the status reply
+    then has no ``standTrimDeg`` (unknown, not zero)."""
+    values = [_num(v) for v in _fields(line).get("trim", "").split("/")]
+    if len(values) != 4 or any(v is None for v in values):
+        return None
+    return dict(zip(("LF", "RF", "LH", "RH"), values))
+
+
 class LinkError(RuntimeError):
     def __init__(self, code: str):
         super().__init__(code)
@@ -132,6 +143,7 @@ class RobotLink:
         self._stops_pending = 0
         self.caps: set[str] = set()
         self._sensor_cache: tuple[float, dict | None, dict | None] | None = None
+        self._stand_trim: dict | None = None  # from the last LEVEL line; None = firmware does not report it
         self._serial = None
         self._last_attempt = None
         self.owner_session: str | None = None
@@ -257,7 +269,9 @@ class RobotLink:
         if cached is not None and now - cached[0] < SENSOR_REFRESH_S:
             return cached[1], cached[2]
         imu = parse_imu_line(self._transact("IMU", "IMU ")) if "IMU1" in self.caps else None
-        level = parse_level_line(self._transact("LEVEL", "LEVEL ")) if "LEVEL1" in self.caps else None
+        level_line = self._transact("LEVEL", "LEVEL ") if "LEVEL1" in self.caps else None
+        level = parse_level_line(level_line) if level_line else None
+        self._stand_trim = parse_stand_trim(level_line) if level_line else None
         self._sensor_cache = (now, imu, level)
         return imu, level
 
@@ -288,6 +302,7 @@ class RobotLink:
                     leg, _, values = item.partition("=")
                     angles[leg] = [int(v) for v in values.split("/")]
                 imu, level = self._sensor_status()
+                stand_trim = self._stand_trim
                 uptime = int(state.get("uptime", "0") or 0)
                 armed = state.get("armed") == "1"
                 if not armed or state.get("ctrl") != "SERIAL":
@@ -300,7 +315,7 @@ class RobotLink:
         except ValueError:
             return {"link": "usb", "connected": self.connected, "serialPort": self.port,
                     "error": "bad_status_reply"}
-        return {
+        reply = {
             "link": "usb",
             "connected": True,
             "serialPort": self.port,
@@ -320,6 +335,9 @@ class RobotLink:
             "imu": imu,
             "level": level,
         }
+        if stand_trim is not None:
+            reply["standTrimDeg"] = stand_trim
+        return reply
 
     def command(self, cmd: str, session: str | None, direction: str | None = None,
                 level_on: str | None = None) -> dict:
