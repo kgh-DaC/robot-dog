@@ -1,0 +1,8 @@
+__pycache__/
+.pytest_cache/
+.ipynb_checkpoints/
+# Arduino build output
+esp32-robot-dog-code-master/tools/servoInitPose/build/
+# Claude Code: per-session loop state and personal overrides
+.claude/.ralph-loop.local.md
+.claude/settings.local.json

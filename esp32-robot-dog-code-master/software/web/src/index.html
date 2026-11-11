@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#101820">
+<title>로봇개 디지털 트윈</title>
+<style>
+	:root { color-scheme: dark; font-family: system-ui, sans-serif; background: #101820; color: #e8f0f2; }
+	* { box-sizing: border-box; }
+	body { margin: 0; min-width: 320px; }
+	.container { max-width: 1100px; margin: auto; padding: 20px; }
+	header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+	h1 { margin: 0 0 6px; font-size: clamp(1.4rem, 4vw, 2rem); }
+	h2 { margin: 0 0 14px; font-size: 1.1rem; }
+	.muted { color: #9eb0b6; font-size: .9rem; }
+	#status { margin: 16px 0; padding: 12px; border: 1px solid #34505b; border-radius: 8px; background: #172630; }
+	.warning { color: #f8d58a; }
+	.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+	.panel { padding: 16px; border: 1px solid #2d424c; border-radius: 10px; background: #17232c; }
+	.metrics { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+	.metric { display: flex; flex-direction: column; gap: 4px; }
+	.metric strong { font-size: 1.35rem; font-variant-numeric: tabular-nums; }
+	.axis-row { display: flex; justify-content: space-between; padding: 7px 0; border-bottom: 1px solid #2d424c; }
+	#robot-scene { display: block; width: 100%; max-height: 250px; margin: 0 auto; }
+	.robot-body { fill: #55727e; stroke: #b6d1d8; stroke-width: 3; }
+	.robot-leg { fill: none; stroke: #6ea2b1; stroke-width: 12; stroke-linecap: round; }
+	.joint-dot { stroke: #101820; stroke-width: 2; }
+	.joint-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }
+	.joint-card { padding: 12px; border-radius: 8px; background: #202f38; }
+	.joint-card h3 { margin: 0 0 8px; font-size: .95rem; }
+	.trend { display: block; width: 100%; height: 90px; margin: 6px 0 12px; }
+	.chart-grid { fill: none; stroke: #344852; stroke-width: 1; }
+	.voltage-line, .power-line { fill: none; stroke-width: 3; stroke-linejoin: round; stroke-linecap: round; }
+	.voltage-line { stroke: #8ed3dc; }
+	.power-line { stroke: #f8d58a; }
+	.joint-value { display: flex; justify-content: space-between; gap: 8px; margin: 5px 0; font-size: .85rem; font-variant-numeric: tabular-nums; }
+	.actions { display: flex; flex-wrap: wrap; gap: 8px; }
+	button { border: 0; border-radius: 6px; padding: 10px 14px; font: inherit; font-weight: 650; color: #102027; background: #8ed3dc; cursor: pointer; }
+	button.secondary { color: #e8f0f2; background: #3b505b; }
+	button.stop { color: #200d0d; background: #f27b72; }
+	button:focus-visible { outline: 3px solid #f8d58a; outline-offset: 2px; }
+	#log-status { min-height: 1.4em; margin-top: 10px; }
+	#control { margin-top: 12px; }
+	#modes { padding: 8px 0; }
+	.joystick_group { display: flex; gap: 10px; min-height: 220px; }
+	.joystick { flex: 1; min-height: 180px; border-radius: 50%; background: radial-gradient(circle, #9bdc9b 0 43%, #263f36 44% 100%); background-repeat: no-repeat; background-position: 50% 50%; opacity: .35; touch-action: none; }
+	.joystick.active { opacity: 1; }
+	.joystick[aria-disabled="true"] { pointer-events: none; opacity: .2; }
+	button:disabled { opacity: .45; cursor: not-allowed; }
+	@media (max-width: 560px) {
+		.container { padding: 14px; }
+		header { flex-direction: column; }
+		.joystick_group { flex-direction: column; }
+	}
+</style>
+</head>
+<body>
+<main class="container">
+	<header>
+		<div>
+			<h1>로봇개 디지털 트윈</h1>
+			<div class="muted">명령 관절각 표시이며 실제 서보 위치 피드백이 아닙니다.</div>
+		</div>
+		<div class="actions" aria-label="로그 관리">
+			<button id="export-log" type="button">CSV 로그 내려받기</button>
+			<button id="clear-log" class="secondary" type="button">로컬 로그 비우기</button>
+		</div>
+	</header>
+	<div id="status" role="status" aria-live="polite">ESP32 연결 대기 중</div>
+	<div id="demo-notice" class="warning" role="note" hidden>모의 미리보기입니다. 아래 수치와 동작은 전부 합성 데이터이며 로봇 제어 및 로그 저장은 비활성화되어 있습니다.</div>
+	<div class="grid">
+		<section class="panel" aria-labelledby="power-title">
+			<h2 id="power-title">전력 및 에너지</h2>
+			<div class="metrics">
+				<div class="metric"><span class="muted">전압</span><strong id="voltage">—</strong></div>
+				<div class="metric"><span class="muted">전류</span><strong id="current">—</strong></div>
+				<div class="metric"><span class="muted">전력</span><strong id="power">—</strong></div>
+				<div class="metric"><span class="muted">적산 에너지*</span><strong id="energy">—</strong></div>
+			</div>
+			<div class="muted">최근 수신 샘플 · 전압(V)</div>
+			<svg class="trend" viewBox="0 0 600 90" role="img" aria-label="최근 전압 추이">
+				<path class="chart-grid" d="M0 15H600 M0 45H600 M0 75H600"/>
+				<path id="voltage-path" class="voltage-line" d=""/>
+			</svg>
+			<div class="muted">최근 수신 샘플 · 전력(W)</div>
+			<svg class="trend" viewBox="0 0 600 90" role="img" aria-label="최근 전력 추이">
+				<path class="chart-grid" d="M0 15H600 M0 45H600 M0 75H600"/>
+				<path id="power-path" class="power-line" d=""/>
+			</svg>
+			<p class="muted">* 브라우저에서 받은 샘플을 적산한 값입니다. 전류 방향 및 배터리 잔량은 검증되지 않았습니다.</p>
+		</section>
+		<section class="panel" aria-labelledby="imu-title">
+			<h2 id="imu-title">IMU 원시 축 각도</h2>
+			<div class="axis-row"><span>X</span><strong id="imu-x">—</strong></div>
+			<div class="axis-row"><span>Y</span><strong id="imu-y">—</strong></div>
+			<div class="axis-row"><span>Z</span><strong id="imu-z">—</strong></div>
+			<p class="muted">축 방향과 roll/pitch/yaw 대응은 기기 장착 상태에서 보정해야 합니다.</p>
+		</section>
+		<section class="panel" aria-labelledby="twin-title">
+			<h2 id="twin-title">관절 동작 모형</h2>
+			<svg id="robot-scene" viewBox="0 0 420 230" role="img" aria-label="12개 관절 명령값을 색으로 표시하는 로봇개 도식">
+				<g class="robot-leg"><path d="M140 75 L75 35 M280 75 L345 35 M140 155 L75 195 M280 155 L345 195"/></g>
+				<rect class="robot-body" x="130" y="58" width="160" height="114" rx="28"/>
+				<text x="210" y="119" text-anchor="middle" fill="#e8f0f2" font-size="16">로봇 몸체</text>
+				<g id="scene-joints">
+					<circle class="joint-dot" data-joint="0" cx="140" cy="75" r="9"/><circle class="joint-dot" data-joint="1" cx="102" cy="52" r="8"/><circle class="joint-dot" data-joint="2" cx="75" cy="35" r="7"/>
+					<circle class="joint-dot" data-joint="3" cx="280" cy="75" r="9"/><circle class="joint-dot" data-joint="4" cx="318" cy="52" r="8"/><circle class="joint-dot" data-joint="5" cx="345" cy="35" r="7"/>
+					<circle class="joint-dot" data-joint="6" cx="140" cy="155" r="9"/><circle class="joint-dot" data-joint="7" cx="102" cy="178" r="8"/><circle class="joint-dot" data-joint="8" cx="75" cy="195" r="7"/>
+					<circle class="joint-dot" data-joint="9" cx="280" cy="155" r="9"/><circle class="joint-dot" data-joint="10" cx="318" cy="178" r="8"/><circle class="joint-dot" data-joint="11" cx="345" cy="195" r="7"/>
+				</g>
+				<text x="56" y="22" fill="#9eb0b6" font-size="12">좌측 전방</text><text x="298" y="22" fill="#9eb0b6" font-size="12">우측 전방</text>
+				<text x="56" y="220" fill="#9eb0b6" font-size="12">좌측 후방</text><text x="298" y="220" fill="#9eb0b6" font-size="12">우측 후방</text>
+			</svg>
+			<div class="muted">도식은 명령 각도를 색으로 나타냅니다. 기구학적으로 검증된 3D 자세가 아닙니다.</div>
+		</section>
+	</div>
+	<section class="panel" aria-labelledby="joint-title" style="margin-top:12px">
+		<h2 id="joint-title">서보 명령 각도</h2>
+		<div id="joint-cards" class="joint-cards"></div>
+	</section>
+	<section class="panel" aria-labelledby="control-title" style="margin-top:12px">
+		<h2 id="control-title">로컬 조이스틱</h2>
+		<p class="warning">로컬 제어 프로토타입입니다. 인터넷 인증·게이트웨이, 자세 안정화, 보정된 기울기 차단은 구현되지 않았습니다. ESP32 WebSocket을 공용 인터넷에 노출하지 말고, 실물 시험은 로봇을 고정한 상태에서 전원 차단 장치에 접근할 수 있을 때만 수행하세요.</p>
+		<div class="actions" aria-label="로봇 동작 제어">
+			<button id="arm-control" type="button" disabled>보행 활성화 (ARM)</button>
+			<button id="stop-control" class="stop" type="button">즉시 정지 (STOP)</button>
+		</div>
+		<div id="control-status" class="muted" role="status" aria-live="polite">비활성화 | 명시적 ARM 대기 중</div>
+		<div id="modes">
+			<input type="checkbox" id="body_rotate"><label for="body_rotate">회전 시험 모드</label>
+		</div>
+		<div id="control">
+			<div class="joystick_group">
+				<div class="joystick" id="leftJ" aria-label="회전 조이스틱"></div>
+				<div class="joystick" id="rightJ" aria-label="이동 조이스틱"></div>
+			</div>
+		</div>
+	</section>
+	<div id="log-status" class="muted" role="status" aria-live="polite"></div>
+</main>
+<script src="c.js"></script>
+<script src="s.js"></script>
+</body>
+</html>

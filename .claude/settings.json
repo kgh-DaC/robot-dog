@@ -1,0 +1,22 @@
+{
+  "enabledPlugins": {
+    "ralph-loop@claude-plugins-official": true
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python",
+            "args": ["C:/Users/ghkim/Downloads/robot_dog/.claude/hooks/loop_guard.py"],
+            "timeout": 10,
+            "onFailure": "continue",
+            "statusMessage": "루프 안전 확인"
+          }
+        ]
+      }
+    ]
+  }
+}
