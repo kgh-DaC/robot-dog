@@ -449,16 +449,23 @@ td small{color:var(--muted)}
     for (var i = 0; i < LEG_IDS.length; i++) if (!isNum(t[LEG_IDS[i]])) return null;
     return t;
   }
+  // Leveling GAMMA offset per leg, or null when missing or not all numbers.
+  function levelOffsets(s) {
+    var o = s && s.level && s.level.gammaOffsetDeg;
+    if (!o) return null;
+    for (var i = 0; i < LEG_IDS.length; i++) if (!isNum(o[LEG_IDS[i]])) return null;
+    return o;
+  }
   // Commanded angles per leg; withCorr adds the leveling GAMMA offset and the
   // standing-pose trim (the angle really sent to the servo). null = unknown.
   function modelAngles(s, withCorr) {
     var trim = withCorr ? standTrim(s) : null;
+    var lvl = withCorr ? levelOffsets(s) : null;
     var out = {};
     LEG_IDS.forEach(function (leg) {
       var a = s && s.angles && s.angles[leg];
       if (!a || a.length !== 3 || !isNum(a[0]) || !isNum(a[1]) || !isNum(a[2])) { out[leg] = null; return; }
-      var off = withCorr && s.level && s.level.gammaOffsetDeg ? s.level.gammaOffsetDeg[leg] : 0;
-      out[leg] = [a[0], a[1], a[2] + (isNum(off) ? off : 0) + (trim ? trim[leg] : 0)];
+      out[leg] = [a[0], a[1], a[2] + (lvl ? lvl[leg] : 0) + (trim ? trim[leg] : 0)];
     });
     return out;
   }
@@ -486,6 +493,9 @@ td small{color:var(--muted)}
       "서 있는 자세 보정: " + LEG_IDS.map(function (leg) { return leg + " " + fmtDeg(trim[leg]); }).join(", ") +
       (md.corr ? " (모형에 포함됨)" : " (보정 포함을 끄면 모형에 넣지 않음)") :
       "서 있는 자세 보정: 알 수 없음 — 이 펌웨어는 값을 보내지 않아 모형에 포함되지 않습니다.";
+    if (fresh && !levelOffsets(state)) {
+      $("mdTrim").textContent += " 수평 보정: 알 수 없음 — 값이 없어 모형에 포함되지 않습니다.";
+    }
     drawModel(angles);
   }
   function drawModel(angles) {

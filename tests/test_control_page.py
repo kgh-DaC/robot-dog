@@ -175,6 +175,15 @@ class JointModelTests(unittest.TestCase):
             self.assertNotIn("NaN", text)
             self.assertNotIn("undefined", text)
 
+    def test_missing_level_offset_is_unknown_not_zero(self):
+        model = self.report["model"]
+        self.assertNotIn("수평 보정: 알 수 없음", model["levelNoteKnown"])
+        self.assertIn("수평 보정: 알 수 없음", model["levelNoteMissing"])
+        self.assertNotIn("NaN", model["levelNoteMissing"])
+        self.assertEqual(self.fk["noLevel"]["LF"], [90, 45, 99])      # level not added (trim 9 only), flagged above
+        self.assertEqual(self.fk["badLevel"]["LF"], [90, 45, 99])     # one bad value = all unknown
+        self.assertEqual(self.fk["withCorr"]["LF"], [90, 45, 88])     # known: unchanged
+
     def test_model_and_table_show_all_legs(self):
         self.assertGreater(self.report["model"]["lines"], 20)
         for html in (self.report["model"]["joints"], self.report["model"]["outOfRange"]):

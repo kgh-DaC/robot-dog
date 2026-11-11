@@ -57,3 +57,9 @@
 - 동작: `render()`가 상태 글자("알 수 없음" 또는 현재 값)를 먼저 쓰고, 그 뒤에 `renderLevel`·`renderCompare`·`renderModel`을 각각 따로 감싸서 부른다. 하나가 예외를 던져도 나머지 카드는 갱신되고, 예외는 `console.error`로 남긴다. 버튼 비활성화, 하트비트, 정지 코드는 건드리지 않았다.
 - 검증: `embed_page.py` 실행 후 `python -m unittest discover tests` 79개 통과(78 + 1). 새 테스트는 관절 모형과 비교 그래프 캔버스가 예외를 던지게 한 뒤 연결을 끊고, 상태 글자·센서 표시·관절 표가 "알 수 없음"/빈 값으로 바뀌고 버튼이 비활성으로 남는지 본다. 수정 전 페이지(HEAD)로 같은 하네스를 돌리면 예외가 밖으로 나와 하네스가 중단된다(테스트 실패에 해당).
 - 남은 것 / 다음에 할 것: 펌웨어 컴파일은 이번 회차에 다시 하지 않았다(내장 페이지 문자열이 약 0.3 kB 늘었을 뿐, L2에서 78%). 보드에는 여전히 옛 페이지다(업로드는 사용자 확인 필요). 다음 항목은 L8.
+
+## 회차 8 — L8 수평 보정값이 없을 때 알 수 없음 표시 — 완료
+- 바꾼 파일: `software/robot_control_web/index.html`(`levelOffsets` 추가, `modelAngles`, `renderModel` 안내 줄), `tools/servoInitPose/web_page.h`(재생성, 48.5 kB), `tests/page_harness.js`, `tests/test_control_page.py`(테스트 1개 추가).
+- 동작: `level.gammaOffsetDeg`가 없거나 네 다리 중 하나라도 숫자가 아니면 수평 보정은 모형에 더하지 않고, 안내 줄 끝에 "수평 보정: 알 수 없음 — 값이 없어 모형에 포함되지 않습니다."가 붙는다. 값이 모두 있으면 안내 줄과 각도는 이전과 같다.
+- 검증: `python -m unittest discover tests` 80개 통과(79 + 1). 없음/일부 잘못됨/있음 세 경우를 확인.
+- 남은 것: 보드에는 여전히 옛 페이지(업로드는 사용자 확인 필요). 작업 목록의 `[ ]`·`[~]` 항목 없음.

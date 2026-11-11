@@ -58,7 +58,7 @@ const okStatus = () => ({
     rollDeg: imuMapped ? (sim.roll === null ? 2.5 : sim.roll) : null,
     pitchDeg: imuMapped ? (sim.pitch === null ? 1.25 : sim.pitch) : null },
   level: { enabled: sim.levelEnabled, active: sim.levelActive, sensorUsable: true, rollCompDeg: 1.5, pitchCompDeg: -0.5,
-    gammaOffsetDeg: { LF: -2, RF: 1, LH: -1, RH: 2 }, maxCompDeg: 6, tiltLimitDeg: 20 },
+    ...(sim.noOffsets ? {} : { gammaOffsetDeg: { LF: -2, RF: 1, LH: -1, RH: 2 } }), maxCompDeg: 6, tiltLimitDeg: 20 },
   ...(sim.trim ? { standTrimDeg: sim.trim } : {}),     // older firmware: field absent
 });
 const response = (obj) => ({ json: () => Promise.resolve(obj), status: 200 });
@@ -165,6 +165,14 @@ const snapshot = () => ({ armed: el("sArmed").textContent, walk: el("sWalk").tex
   report.fk.withTrim = T.modelAngles(okStatus(), true);
   report.fk.trimNoCorr = T.modelAngles(okStatus(), false);
   report.fk.badTrim = T.modelAngles(Object.assign(okStatus(), { standTrimDeg: { LF: 9, RF: 1, LH: null, RH: -9 } }), true);
+  report.model.levelNoteKnown = el("mdTrim").textContent;
+  report.fk.noLevel = T.modelAngles(Object.assign(okStatus(), { level: { enabled: true } }), true);
+  report.fk.badLevel = T.modelAngles(Object.assign(okStatus(), { level: { gammaOffsetDeg: { LF: "x", RF: 1, LH: -1, RH: 2 } } }), true);
+  sim.noOffsets = true;
+  await advance(600);
+  report.model.levelNoteMissing = el("mdTrim").textContent;
+  sim.noOffsets = false;
+  await advance(600);
   el("mdCorr").onclick();                 // corrections off
   await advance(100);
   report.model.trimNoteOff = el("mdTrim").textContent;
