@@ -223,6 +223,52 @@ class LevelCompareTests(unittest.TestCase):
             self.assertNotIn("undefined", text)
         self.assertEqual(self.report["cmpSentCommands"], 0)
 
+    def test_stats_function_with_mixed_sign_samples(self):
+        # a = [3, -1, -4, 2], b = [-2, 2, -6, 6] at t = 0, 250, 500, 750 ms
+        a, b = self.report["cmpDirect"]["a"], self.report["cmpDirect"]["b"]
+        self.assertEqual(a["n"], 4)
+        self.assertAlmostEqual(a["mean"], 0.0)              # signs cancel in the mean ...
+        self.assertAlmostEqual(a["meanAbs"], 2.5)           # ... but not in the absolute mean
+        self.assertAlmostEqual(a["rms"], (30 / 4) ** 0.5)
+        self.assertAlmostEqual(a["maxAbs"], 4.0)            # largest magnitude is the negative sample
+        self.assertAlmostEqual(a["p2p"], 7.0)
+        self.assertAlmostEqual(a["sec"], 0.75)
+        self.assertAlmostEqual(b["mean"], 0.0)
+        self.assertAlmostEqual(b["meanAbs"], 4.0)
+        self.assertAlmostEqual(b["rms"], (80 / 4) ** 0.5)
+        self.assertAlmostEqual(b["maxAbs"], 6.0)
+        self.assertAlmostEqual(b["p2p"], 12.0)
+
+    def test_stats_function_with_no_or_one_sample(self):
+        self.assertIsNone(self.report["cmpDirect"]["empty"])
+        one = self.report["cmpDirect"]["single"]
+        self.assertEqual(one["n"], 1)
+        self.assertAlmostEqual(one["mean"], -1.5)
+        self.assertAlmostEqual(one["meanAbs"], 1.5)
+        self.assertAlmostEqual(one["rms"], 1.5)
+        self.assertAlmostEqual(one["p2p"], 0.0)
+        self.assertAlmostEqual(one["sec"], 0.0)
+
+    def test_first_second_after_a_switch_is_excluded_from_statistics(self):
+        rows, view = self.report["cmpSettle"]["rows"], self.report["cmpSettle"]["view"]
+        skipped = [r for r in rows if not r["used"]]
+        used = [r for r in rows if r["used"]]
+        self.assertGreaterEqual(len(skipped), 2)
+        self.assertGreaterEqual(len(used), 4)
+        self.assertEqual(rows[0]["sec"], 0.0)
+        for r in rows:
+            self.assertEqual(bool(r["used"]), r["sec"] >= 1.0, r)
+        self.assertIn("꺼짐 %d개" % len(used), view["summary"])   # only the used samples are counted
+
+    def test_segment_is_limited_to_the_last_60_seconds(self):
+        rows, view = self.report["cmpWindow"]["rows"], self.report["cmpWindow"]["view"]
+        self.assertGreater(len(rows), len(self.report["cmpSettle"]["rows"]))
+        self.assertGreater(rows[-1]["sec"], 59.0)           # 73 s were recorded ...
+        self.assertLessEqual(rows[-1]["sec"], 60.0)         # ... but only 60 s are kept
+        self.assertTrue(all(r["used"] for r in rows))       # the settle second has scrolled out
+        self.assertIn("꺼짐 %d개" % len(rows), view["summary"])
+        self.assertIn("<td>%.1f초</td>" % rows[-1]["sec"], view["body"])
+
 
 class EmbeddedPageTests(unittest.TestCase):
     def test_firmware_header_matches_page(self):

@@ -16,7 +16,7 @@
   - 범위: `software/robot_control_web/index.html`, `tests/page_harness.js`, `tests/test_control_page.py`
   - 완료 기준: `standTrimDeg`가 있으면 "보정 포함"일 때 GAMMA에 더하고, 없으면 더하지 않고 안내 문구에 "미포함"을 유지한다. 표에 보정 출처가 드러난다. 테스트 추가(있음/없음 두 경우), 전체 통과, `web_page.h` 재생성.
   - 의존: L2
-- [ ] L4. 수평 비교 통계의 순수 함수 테스트 보강
+- [x] L4. 수평 비교 통계의 순수 함수 테스트 보강
   - 범위: `tests/page_harness.js`, `tests/test_control_page.py`
   - 완료 기준: `RobotTwin.cmpStats`를 직접 호출해 평균·평균 절대값·RMS·최대·폭을 부호가 섞인 표본으로 검증한다. 전환 후 1초 제외와 60초 창 제한을 검증한다. 전체 통과.
 - [ ] L5. 독립 QA 검토

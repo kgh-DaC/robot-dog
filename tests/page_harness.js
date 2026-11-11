@@ -203,5 +203,19 @@ const snapshot = () => ({ armed: el("sArmed").textContent, walk: el("sWalk").tex
   report.cmpUnmapped = cmpView();
   imuMapped = true;
   report.cmpSentCommands = posts.length - hbCount() - postsBefore;   // comparison must never send commands
+
+  // ---- comparison statistics: pure function, settle exclusion, 60 s window -------
+  const mixed = [[0, 3, -2], [250, -1, 2], [500, -4, -6], [750, 2, 6]].map(([t, a, b]) => ({ t, a, b }));
+  report.cmpDirect = { a: T.cmpStats(mixed, "a"), b: T.cmpStats(mixed, "b"), empty: T.cmpStats([], "a"),
+    single: T.cmpStats([{ t: 5000, a: -1.5, b: 0 }], "a") };
+  const fwdOffRows = () => T.cmpCsv().split("\n").slice(1).map((l) => l.split(","))
+    .filter((c) => c[0] === "FORWARD" && c[1] === "off").map((c) => ({ sec: Number(c[2]), used: Number(c[5]) }));
+  sim.walk = "FORWARD"; sim.levelEnabled = false; sim.levelActive = false; sim.roll = 2; sim.pitch = -3;
+  await advance(600);                    // let the new motion reach the page before clearing
+  el("cmpClear").onclick();
+  await advance(3000);                   // short segment: its first second must not count
+  report.cmpSettle = { rows: fwdOffRows(), view: cmpView() };
+  await advance(70000);                  // same segment kept running past the 60 s window
+  report.cmpWindow = { rows: fwdOffRows(), view: cmpView() };
   process.stdout.write(JSON.stringify(report));
 })();
