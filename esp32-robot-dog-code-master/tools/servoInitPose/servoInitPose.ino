@@ -42,6 +42,18 @@ const uint8_t SERVO_MIN_ANGLE = 20;
 const uint8_t SERVO_MAX_ANGLE = 160;
 const uint8_t MAX_JOINT_OFFSET = 15;
 const int SWING_LIFT_GAMMA_DEG = 11;  // knee fold of the swing leg while walking (8 dragged, 14 tipped)
+// 2026-11-12 gait rework (not yet tried on hardware): the old gait moved the
+// lifted legs and the pushing legs at the same moment with a +-5 deg stride, so
+// feet dragged and the body advanced only ~5 mm in 5 s. Now each half-cycle has
+// three steps: lift the swing pair, swing it forward while the stance pair pushes
+// back, lower it. Tune these first if the robot tips, slips or browns out.
+const int WALK_STRIDE_DEG = 7;            // BETA offset at each end of the stroke (was 5)
+const int WALK_SIDE_DEG = 4;              // ALPHA offset for LEFT/RIGHT turns (unchanged)
+const int WALK_TURN_BETA_DEG = 3;         // BETA offset for turns (unchanged)
+const uint16_t WALK_LIFT_MS = 350;        // time to lift the swing pair
+const uint16_t WALK_MOVE_MS = 600;        // swing forward / push back
+const uint16_t WALK_LOWER_MS = 300;       // time to put the swing pair down
+const uint16_t WALK_PULSE_STEP_US = 8;    // servo slew while walking (was 5; 8 us/20 ms = ~40 deg/s)
 const uint16_t PULSE_STEP_US = 5;
 const uint16_t PULSE_STEP_INTERVAL_MS = 20;
 // Boot homing: slower slew (2 us / 20 ms = 100 us/s, about 10 deg/s at the horn)
@@ -76,7 +88,9 @@ unsigned long lastPoseSaveAt = 0;
 bool poseSettled = false;
 enum WalkDirection { WALK_STOPPED, WALK_FORWARD, WALK_BACKWARD, WALK_LEFT, WALK_RIGHT };
 WalkDirection walkDirection = WALK_STOPPED;
-uint8_t walkPhase = 0;
+uint8_t walkPhase = 0;   // which diagonal pair swings: 0 = LF+RH, 1 = RF+LH
+uint8_t walkStep = 0;    // 0 lift, 1 swing/push, 2 lower
+bool walkFresh = false;  // first half-cycle after the walk starts: legs begin at neutral
 unsigned long nextWalkPhaseAt = 0;
 
 // Remote control (USB gateway, Wi-Fi web page or the 4way notebook). Every walk
@@ -217,6 +231,10 @@ int neutralAngle(int servoIndex)
   return servoIndex % 3 == 1 ? 45 : 90;
 }
 
+// Pose for the current (walkPhase, walkStep). The swing pair S ends its stance
+// at the "stance end" of the stroke and the other pair T ends its swing at the
+// "swing end"; during step 1 S goes to the swing end (in the air) while T goes
+// to the stance end (on the floor, pushing the body forward).
 void setWalkingPose()
 {
   int angles[SERVO_COUNT];
@@ -225,29 +243,31 @@ void setWalkingPose()
   const int swingPairA[] = {0, 9}; // LF + RH
   const int swingPairB[] = {3, 6}; // RF + LH
   const int *swingPair = walkPhase == 0 ? swingPairA : swingPairB;
-  // 2026-11-11: the swing leg used to be pushed DOWN (GAMMA +8, see below), so
-  // the "swing" and "stance" pairs were effectively swapped. With the lift
-  // fixed (GAMMA -8) the robot walked backward on FORWARD, so every
-  // swing-dependent BETA/ALPHA sign below is flipped to keep the old travel
-  // directions. FORWARD confirmed on hardware after the change: pending.
-  const int stride = walkDirection == WALK_BACKWARD ? 5 : -5;
-  const int side = walkDirection == WALK_LEFT ? 4 : -4;
+  // Signs keep the travel direction confirmed on hardware 2026-11-11: FORWARD
+  // puts the swing leg at BETA +stride and the pushing leg at BETA -stride.
+  const int stride = walkDirection == WALK_BACKWARD ? WALK_STRIDE_DEG : -WALK_STRIDE_DEG;
+  const int side = walkDirection == WALK_LEFT ? WALK_SIDE_DEG : -WALK_SIDE_DEG;
+  const bool straight = walkDirection == WALK_FORWARD || walkDirection == WALK_BACKWARD;
 
   for (int leg = 0; leg < 4; leg++) {
     const int base = leg * 3;
     const bool swing = leg == swingPair[0] / 3 || leg == swingPair[1] / 3;
-    if (walkDirection == WALK_FORWARD || walkDirection == WALK_BACKWARD) {
-      angles[base + 1] += swing ? -stride : stride;
-    } else {
-      angles[base] += swing ? side : -side;
-      angles[base + 1] += swing ? 3 : -3;
+    // Is this leg at the swing end of its stroke in this step?
+    const bool atSwingEnd = swing ? walkStep >= 1 : walkStep == 0;
+    if (!(walkFresh && walkStep == 0)) {
+      const int sign = atSwingEnd ? 1 : -1;       // swing end +, stance end -
+      if (straight) {
+        angles[base + 1] += sign * -stride;
+      } else {
+        angles[base] += sign * side;
+        angles[base + 1] += sign * WALK_TURN_BETA_DEG;
+      }
     }
-    // Lift the swing leg: a LOWER GAMMA shortens the leg (measured standing,
-    // 2026-11-11; it was +8 before, which pushed the swing leg into the floor).
-    // -8 still dragged the feet on the floor (about 5 mm in 5 s), so the lift
-    // was raised to -14, which tipped the body over the lifted diagonal (8.6 deg),
-    // so it is now -11 (2026-11-11, board 0FA1).
-    if (swing) angles[base + 2] -= SWING_LIFT_GAMMA_DEG;
+    // Lift only while the swing leg is actually in the air (steps 0 and 1).
+    // A LOWER GAMMA shortens the leg (measured standing, 2026-11-11). Lift
+    // history: +8 pushed into the floor, -8 dragged, -14 tipped (8.6 deg),
+    // -11 is the current value.
+    if (swing && walkStep < 2) angles[base + 2] -= SWING_LIFT_GAMMA_DEG;
   }
 
   for (int i = 0; i < SERVO_COUNT; i++) {
@@ -270,8 +290,13 @@ void updateWalking()
   if ((long)(now - nextWalkPhaseAt) < 0) return;
 
   setWalkingPose();
-  walkPhase = 1 - walkPhase;
-  nextWalkPhaseAt = now + 1200;
+  const uint16_t holdMs = walkStep == 0 ? WALK_LIFT_MS : walkStep == 1 ? WALK_MOVE_MS : WALK_LOWER_MS;
+  nextWalkPhaseAt = now + holdMs;
+  if (++walkStep >= 3) {
+    walkStep = 0;
+    walkPhase = 1 - walkPhase;
+    walkFresh = false;
+  }
 }
 
 const char *controllerName(Controller value)
@@ -343,6 +368,8 @@ const char *controlWalk(Controller source, WalkDirection direction)
   } else if (direction != walkDirection) {
     walkDirection = direction;
     walkPhase = 0;
+    walkStep = 0;
+    walkFresh = true;
     nextWalkPhaseAt = millis();
   }
   leaseDeadline = millis() + LEASE_TIMEOUT_MS;
@@ -801,7 +828,8 @@ void updateServoPulses()
   if (now - lastPulseUpdate < PULSE_STEP_INTERVAL_MS) return;
   lastPulseUpdate = now;
 
-  const int step = startupHoming ? STARTUP_PULSE_STEP_US : PULSE_STEP_US;
+  const int step = startupHoming ? STARTUP_PULSE_STEP_US :
+                  walkDirection != WALK_STOPPED ? WALK_PULSE_STEP_US : PULSE_STEP_US;
   bool allReached = true;
   for (int i = 0; i < SERVO_COUNT; i++) {
     if (currentPulses[i] == targetPulses[i]) continue;
