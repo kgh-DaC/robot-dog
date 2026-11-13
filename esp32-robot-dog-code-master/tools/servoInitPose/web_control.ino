@@ -14,9 +14,18 @@
 // The server runs in its own task (webTask) so a slow or stalled HTTP client
 // cannot delay the lease check, serial STOP or servo slewing in loop().
 // Handlers take controlMutex only around shared state, never around network I/O.
+//
+// Hotspot (station) mode: the AP above always stays on. If a hotspot was saved
+// with the serial command "WIFI_SET <ssid><TAB><password>" (stored in flash,
+// never printed or sent back), the ESP32 also joins that network and serves
+// the same page at its DHCP address and at http://robotdog.local. A failed
+// join gives up after STA_TRY_MS so channel scanning does not disturb the AP,
+// and is retried every STA_RETRY_MS only while the robot is not armed.
+// "WIFI_CLEAR" forgets the hotspot.
 
 #include <WiFi.h>
 #include <WebServer.h>
+#include <ESPmDNS.h>
 #include <esp_mac.h>
 #include "web_page.h"
 
@@ -33,6 +42,34 @@ bool wifiReady = false;
 char wifiSsid[24] = "";
 char wifiPass[16] = "";
 char wifiOwnerSession[33] = "";
+
+// ---- hotspot (station) link ------------------------------------------------
+const char MDNS_NAME[] = "robotdog";            // http://robotdog.local
+const uint32_t STA_TRY_MS = 15000;              // one join attempt
+const uint32_t STA_RETRY_MS = 30000;            // pause before the next attempt
+// Origins allowed to call the API from another page (the USB gateway page
+// switching to the hotspot link). Only loopback: any other site stays blocked.
+const char *const CORS_ORIGINS[] = {"http://127.0.0.1:8787", "http://localhost:8787"};
+
+enum StaState { STA_OFF, STA_CONNECTING, STA_CONNECTED, STA_NOT_FOUND, STA_FAILED };
+char staSsid[33] = "";
+char staPass[64] = "";
+volatile StaState staState = STA_OFF;
+bool staTrying = false;
+uint32_t staAttemptMs = 0;
+uint32_t staNextMs = 0;
+char staIp[16] = "";                             // written in loop(), read by the web task
+
+const char *staStateName(int value)  // int: Arduino prototypes precede the enum
+{
+  switch (value) {
+    case STA_CONNECTING: return "CONNECTING";
+    case STA_CONNECTED: return "CONNECTED";
+    case STA_NOT_FOUND: return "NOT_FOUND";
+    case STA_FAILED: return "FAILED";
+    default: return "OFF";
+  }
+}
 
 // Fixed password chosen by the user (WPA2 needs 8..63 characters). Anyone who
 // knows it and is in range can open the control page. Set to "" to go back to
@@ -80,7 +117,149 @@ void printWifiInfo()
   Serial.print(" ip=");
   Serial.print(WiFi.softAPIP());
   Serial.print(" clients=");
-  Serial.println(WiFi.softAPgetStationNum());
+  Serial.print(WiFi.softAPgetStationNum());
+  // sta_ssid goes last: it may contain spaces (the rest of the line is the SSID).
+  Serial.print(" sta=");
+  Serial.print(staStateName(staState));
+  Serial.print(" sta_ip=");
+  Serial.print(staIp[0] ? staIp : "-");
+  Serial.print(" sta_ssid=");
+  Serial.println(staSsid);
+}
+
+// ---- hotspot (station) control ------------------------------------------------
+
+void loadStaConfig()
+{
+  Preferences store;
+  if (!store.begin("wifiSta", true)) return;
+  String ssid = store.getString("ssid", "");
+  String pass = store.getString("pass", "");
+  store.end();
+  if (ssid.length() == 0 || ssid.length() >= sizeof(staSsid) || pass.length() >= sizeof(staPass)) return;
+  strcpy(staSsid, ssid.c_str());
+  strcpy(staPass, pass.c_str());
+}
+
+void staBegin(uint32_t now)
+{
+  WiFi.begin(staSsid, staPass[0] ? staPass : NULL);
+  staTrying = true;
+  staAttemptMs = now;
+  staState = STA_CONNECTING;
+}
+
+void staStop()
+{
+  WiFi.disconnect(false, true);  // keep the radio (AP) on, forget the STA config
+  staTrying = false;
+  staIp[0] = '\0';
+}
+
+// Called from loop() with controlMutex held. Gives up a failed join after
+// STA_TRY_MS and retries only while disarmed, so scanning never disturbs a
+// controller connected through the AP while the robot can move.
+void wifiStaService()
+{
+  if (!wifiReady || staSsid[0] == '\0') return;
+  const uint32_t now = millis();
+  const wl_status_t status = WiFi.status();
+  if (status == WL_CONNECTED) {
+    if (staState != STA_CONNECTED) {
+      WiFi.localIP().toString().toCharArray(staIp, sizeof(staIp));
+      staState = STA_CONNECTED;
+      staTrying = false;
+      Serial.print("EVENT WIFI_STA connected ip=");
+      Serial.println(staIp);
+    }
+    return;
+  }
+  if (staState == STA_CONNECTED) {  // hotspot went away
+    staIp[0] = '\0';
+    staState = STA_FAILED;
+    staNextMs = now;                // retry at once (subject to the armed check)
+    Serial.println("EVENT WIFI_STA lost");
+  }
+  if (staTrying) {
+    if (now - staAttemptMs < STA_TRY_MS) return;
+    staState = status == WL_NO_SSID_AVAIL ? STA_NOT_FOUND : STA_FAILED;
+    staStop();
+    staNextMs = now + STA_RETRY_MS;
+    Serial.print("EVENT WIFI_STA ");
+    Serial.println(staStateName(staState));
+    return;
+  }
+  if (!armed && (int32_t)(now - staNextMs) >= 0) staBegin(now);
+}
+
+// Serial only (USB = physical access). Caller holds controlMutex (loop()).
+// ssid: 1..32 bytes; pass: "" (open network) or 8..63 printable ASCII.
+const char *wifiStaSet(const char *ssid, const char *pass)
+{
+  if (!wifiReady) return "wifi_disabled";
+  if (armed) return "armed";
+  const size_t ssidLen = strlen(ssid), passLen = strlen(pass);
+  if (ssidLen == 0 || ssidLen >= sizeof(staSsid)) return "invalid_ssid";
+  for (size_t i = 0; i < ssidLen; i++) {
+    if ((unsigned char)ssid[i] < 0x20 || ssid[i] == 0x7f) return "invalid_ssid";
+  }
+  if (passLen != 0 && (passLen < 8 || passLen >= sizeof(staPass))) return "invalid_password";
+  for (size_t i = 0; i < passLen; i++) {
+    if (pass[i] < 0x20 || pass[i] > 0x7e) return "invalid_password";
+  }
+  Preferences store;
+  if (!store.begin("wifiSta", false)) return "store_failed";
+  const bool saved = store.putString("ssid", ssid) == ssidLen && store.putString("pass", pass) == passLen;
+  store.end();
+  if (!saved) return "store_failed";
+  staStop();
+  strcpy(staSsid, ssid);
+  strcpy(staPass, pass);
+  staBegin(millis());
+  return NULL;
+}
+
+const char *wifiStaClear()
+{
+  if (!wifiReady) return "wifi_disabled";
+  if (armed) return "armed";
+  Preferences store;
+  if (store.begin("wifiSta", false)) {
+    store.clear();
+    store.end();
+  }
+  staStop();
+  staSsid[0] = '\0';
+  staPass[0] = '\0';
+  staState = STA_OFF;
+  return NULL;
+}
+
+// JSON string body (no quotes): escapes '"', '\\' and control characters.
+void jsonEscape(char *out, size_t size, const char *text)
+{
+  size_t n = 0;
+  for (const char *p = text; *p && n + 7 < size; p++) {
+    const unsigned char c = (unsigned char)*p;
+    if (c == '"' || c == '\\') {
+      out[n++] = '\\';
+      out[n++] = c;
+    } else if (c < 0x20) {
+      n += snprintf(out + n, size - n, "\\u%04x", c);
+    } else {
+      out[n++] = c;
+    }
+  }
+  out[n] = '\0';
+}
+
+// {"status":"CONNECTED","ip":"172.20.10.3","ssid":"..."}; never the password.
+void formatStaJson(char *out, size_t size)
+{
+  char ssid[200];  // 32 bytes, worst case 6x when every byte is a control escape
+  jsonEscape(ssid, sizeof(ssid), staSsid);
+  snprintf(out, size, "{\"status\":\"%s\",\"ip\":\"%s\",\"ssid\":\"%s\",\"host\":\"%s.local\"}",
+           staStateName(staState), staIp, ssid, MDNS_NAME);
 }
 
 bool validSession(const String &session)
@@ -103,10 +282,23 @@ struct ControlLock {
   ~ControlLock() { xSemaphoreGive(controlMutex); }
 };
 
+bool corsOriginAllowed()
+{
+  const String origin = webServer.header("Origin");
+  for (const char *allowed : CORS_ORIGINS) {
+    if (origin == allowed) return true;
+  }
+  return false;
+}
+
 void sendNoStoreHeaders()
 {
   webServer.sendHeader("Cache-Control", "no-store");
   webServer.sendHeader("X-Content-Type-Options", "nosniff");
+  if (corsOriginAllowed()) {
+    webServer.sendHeader("Access-Control-Allow-Origin", webServer.header("Origin"));
+    webServer.sendHeader("Vary", "Origin");
+  }
 }
 
 void sendJsonResult(int status, const char *error)
@@ -127,14 +319,42 @@ void handleRoot()
   webServer.send(200, "text/html; charset=utf-8", ROBOT_CONTROL_PAGE);
 }
 
-// Blocks DNS rebinding: a foreign web page whose host name resolves to
-// 192.168.4.1 still sends its own name in the Host header.
+// Blocks DNS rebinding: a foreign web page whose host name resolves to one of
+// the robot's addresses still sends its own name in the Host header.
+// Accepted: the AP address, the current hotspot address and robotdog.local.
 bool hostOk()
 {
-  const String host = webServer.hostHeader();
-  if (host == "192.168.4.1" || host == "192.168.4.1:80") return true;
+  String host = webServer.hostHeader();
+  if (host.endsWith(":80")) host.remove(host.length() - 3);
+  host.toLowerCase();
+  char ip[sizeof(staIp)];
+  {
+    ControlLock lock;
+    strcpy(ip, staIp);
+  }
+  if (host == "192.168.4.1" || (ip[0] && host == ip) || host == String(MDNS_NAME) + ".local") return true;
   sendJsonResult(403, "bad_host");
   return false;
+}
+
+// CORS preflight for the API. Approved only for CORS_ORIGINS (the USB gateway
+// page on this computer); every other site keeps getting a refusal, so the
+// X-Robot-Control header still blocks cross-site commands.
+void handlePreflight()
+{
+  if (!hostOk()) return;
+  if (!corsOriginAllowed()) {
+    sendJsonResult(403, "origin_not_allowed");
+    return;
+  }
+  sendNoStoreHeaders();
+  webServer.sendHeader("Access-Control-Allow-Methods", "GET, POST");
+  webServer.sendHeader("Access-Control-Allow-Headers", "Content-Type, X-Robot-Control");
+  if (webServer.header("Access-Control-Request-Private-Network") == "true") {
+    webServer.sendHeader("Access-Control-Allow-Private-Network", "true");
+  }
+  webServer.sendHeader("Access-Control-Max-Age", "600");
+  webServer.send(204);
 }
 
 void handleStatus()
@@ -143,7 +363,7 @@ void handleStatus()
   const String session = webServer.arg("session");
   const bool sessionValid = validSession(session);
   const int clients = WiFi.softAPgetStationNum();  // outside the lock
-  char body[1536];  // worst case ~1.2 kB with the IMU, level and standTrimDeg objects
+  char body[1792];  // worst case ~1.5 kB with the IMU, level, standTrimDeg and sta objects
   {
     ControlLock lock;
     const bool youControl = sessionValid && sessionOwnsControl(session);
@@ -158,6 +378,8 @@ void handleStatus()
              servos[3].targetAngle, servos[4].targetAngle, servos[5].targetAngle,
              servos[6].targetAngle, servos[7].targetAngle, servos[8].targetAngle,
              servos[9].targetAngle, servos[10].targetAngle, servos[11].targetAngle);
+    char sta[320];  // worst case ~290 B (escaped 32-byte SSID)
+    formatStaJson(sta, sizeof(sta));
     char trim[96];  // worst case 58 B: {"LF":-99.9,"RF":-99.9,"LH":-99.9,"RH":-99.9}
     snprintf(trim, sizeof(trim), "{\"LF\":%.1f,\"RF\":%.1f,\"LH\":%.1f,\"RH\":%.1f}",
              STAND_GAMMA_TRIM_DEG[0], STAND_GAMMA_TRIM_DEG[1], STAND_GAMMA_TRIM_DEG[2],
@@ -166,12 +388,12 @@ void handleStatus()
              "{\"link\":\"wifi\",\"connected\":true,\"armed\":%s,\"controller\":\"%s\","
              "\"youControl\":%s,\"walk\":\"%s\",\"homing\":%s,\"settled\":%s,"
              "\"resetReason\":\"%s\",\"lastStop\":\"%s\",\"uptimeMs\":%lu,"
-             "\"leaseTimeoutMs\":%u,\"angles\":%s,\"wifi\":{\"ssid\":\"%s\",\"clients\":%d},\"imu\":%s,\"level\":%s,\"standTrimDeg\":%s}",
+             "\"leaseTimeoutMs\":%u,\"angles\":%s,\"wifi\":{\"ssid\":\"%s\",\"clients\":%d,\"sta\":%s},\"imu\":%s,\"level\":%s,\"standTrimDeg\":%s}",
              armed ? "true" : "false", controllerName(controller),
              youControl ? "true" : "false", walkName(walkDirection),
              startupHoming ? "true" : "false", poseSettledAndSaved() ? "true" : "false",
              resetReasonName(), lastStopReason, (unsigned long)millis(),
-             (unsigned)LEASE_TIMEOUT_MS, angles, wifiSsid, clients, imuJson, levelJson, trim);
+             (unsigned)LEASE_TIMEOUT_MS, angles, wifiSsid, clients, sta, imuJson, levelJson, trim);
   }
   sendNoStoreHeaders();
   webServer.send(200, "application/json", body);
@@ -234,8 +456,8 @@ const char *applyCommand(const String &cmd, const String &session, const String 
 void handleCommand()
 {
   if (!hostOk()) return;
-  // A custom header forces a CORS preflight, which this server never approves,
-  // so other web sites cannot send commands through the user's browser.
+  // A custom header forces a CORS preflight, which this server approves only for
+  // CORS_ORIGINS, so other web sites cannot send commands through the user's browser.
   if (webServer.header("X-Robot-Control") != "1") {
     sendJsonResult(403, "missing_control_header");
     return;
@@ -263,7 +485,11 @@ void webTask(void *)
 void webSetup()
 {
   if (!WIFI_ENABLED) return;
-  WiFi.mode(WIFI_AP);
+  // Station config lives only in our own "wifiSta" store; the driver must not
+  // reconnect on its own (wifiStaService decides when to try).
+  WiFi.persistent(false);
+  WiFi.setAutoReconnect(false);
+  WiFi.mode(WIFI_AP_STA);
   loadOrCreateWifiPassword();
   uint8_t mac[6];
   // From eFuse: valid even before the Wi-Fi driver has started.
@@ -278,11 +504,13 @@ void webSetup()
   // Lower TX power: less current draw on the shared servo/ESP32 battery.
   WiFi.setTxPower(WIFI_POWER_8_5dBm);
 
-  const char *headers[] = {"X-Robot-Control"};
-  webServer.collectHeaders(headers, 1);
+  const char *headers[] = {"X-Robot-Control", "Origin", "Access-Control-Request-Private-Network"};
+  webServer.collectHeaders(headers, 3);
   webServer.on("/", HTTP_GET, handleRoot);
   webServer.on("/api/status", HTTP_GET, handleStatus);
   webServer.on("/api/command", HTTP_POST, handleCommand);
+  webServer.on("/api/status", HTTP_OPTIONS, handlePreflight);
+  webServer.on("/api/command", HTTP_OPTIONS, handlePreflight);
   webServer.onNotFound([]() { sendJsonResult(404, "not_found"); });
   webServer.begin();
   if (xTaskCreatePinnedToCore(webTask, "web", WEB_TASK_STACK, NULL, WEB_TASK_PRIORITY,
@@ -294,5 +522,9 @@ void webSetup()
     return;
   }
   wifiReady = true;
+  if (MDNS.begin(MDNS_NAME)) MDNS.addService("http", "tcp", 80);
+  else Serial.println("WIFI_ERROR mdns_failed");
+  loadStaConfig();
+  if (staSsid[0]) staBegin(millis());
   printWifiInfo();
 }

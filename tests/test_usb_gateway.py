@@ -495,7 +495,11 @@ class FirmwareSourceTests(unittest.TestCase):
             body = src[src.index(handler):]
             body = body[:body.index("\n}\n")]
             self.assertIn("if (!hostOk()) return;", body.split("\n", 3)[2], handler)
-        self.assertIn('host == "192.168.4.1" || host == "192.168.4.1:80"', src)
+        # AP address, current hotspot address, robotdog.local; ":80" stripped first.
+        self.assertIn('if (host.endsWith(":80")) host.remove(host.length() - 3);', src)
+        self.assertIn('host == "192.168.4.1" || (ip[0] && host == ip) || host == String(MDNS_NAME) + ".local"', src)
+        # Cross-origin calls are approved only for the loopback gateway page.
+        self.assertIn('{"http://127.0.0.1:8787", "http://localhost:8787"}', src)
 
     def test_web_server_runs_outside_the_safety_loop(self):
         main = (self.SKETCH / "servoInitPose.ino").read_text(encoding="utf-8")

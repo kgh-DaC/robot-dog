@@ -75,7 +75,7 @@ const char *JOINT_NAMES[] = {"ALPHA", "BETA", "GAMMA"};
 int servoIds[SERVO_COUNT];
 uint16_t currentPulses[SERVO_COUNT];
 uint16_t targetPulses[SERVO_COUNT];
-char commandBuffer[64];
+char commandBuffer[128];  // WIFI_SET <32-byte ssid><TAB><63-char password> fits
 uint8_t commandLength = 0;
 unsigned long lastPulseUpdate = 0;
 bool servosReady = false;
@@ -464,6 +464,25 @@ bool poseSettledAndSaved()
 
 void processCommand(char *line)
 {
+  // Hotspot settings: parsed before strtok because the SSID may contain spaces.
+  // WIFI_SET <ssid><TAB><password>  (empty password = open network)
+  if (strncmp(line, "WIFI_SET ", 9) == 0 || strcmp(line, "WIFI_CLEAR") == 0) {
+    const bool clear = line[5] == 'C';
+    char *tab = clear ? NULL : strchr(line + 9, '\t');
+    const char *error = clear ? wifiStaClear() : tab == NULL ? "format_USE_WIFI_SET_ssid_TAB_password" : NULL;
+    if (error == NULL && !clear) {
+      *tab = '\0';
+      error = wifiStaSet(line + 9, tab + 1);
+    }
+    if (error != NULL) {
+      Serial.print("ERR ");
+      Serial.println(error);
+      return;
+    }
+    Serial.println(clear ? "OK WIFI_CLEAR" : "OK WIFI_SET");
+    return;
+  }
+
   char *save = NULL;
   char *command = strtok_r(line, " \t", &save);
   if (command == NULL) return;
@@ -485,7 +504,7 @@ void processCommand(char *line)
   }
 
   if (strcmp(command, "CAPS") == 0) {
-    Serial.println("CAPS SERVO_POSE_V1 WALK4 LEASE1 WIFI1 IMU1 LEVEL1");
+    Serial.println("CAPS SERVO_POSE_V1 WALK4 LEASE1 WIFI1 IMU1 LEVEL1 STA1");
     return;
   }
 
@@ -929,6 +948,7 @@ void loop()
   updateWalking();
   updateServoPulses();
   savePoseIfSettled();
+  wifiStaService();  // hotspot join/retry; never starts a join while armed
   xSemaphoreGive(controlMutex);
   delay(2);
 }
