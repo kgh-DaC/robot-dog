@@ -17,7 +17,7 @@ ESP32 사족 로봇개(12개 서보, 다리당 3관절)를 웹 페이지 하나�
 | 수평 보정 | 2026-11-13 추가: 펌웨어 `TRIM` 명령 + `level_calibrate.py`. 테스트·컴파일·업로드 완료. **실물 보정은 못 함: IMU가 I2C에서 응답하지 않음** (부팅 로그 `I2C none`, `IMU_ERROR not_found`; 업로드 전 게이트웨이에서도 `ready:false`) |
 | 핫스팟 기능 | 코드·QA 완료, **실물 미시험** (핫스팟 설정을 아직 저장하지 않음, `sta=OFF`) |
 | 3단계 보행 | 업로드됨, **바닥 실물 미시험** |
-| 테스트 | `python -m unittest discover tests` → 118개 통과 |
+| 테스트 | `python -m unittest discover tests` → 120개 통과 |
 | 컴파일 | 1,090,823 B (플래시 83%) |
 | 루프 작업 목록 | `_workspace/loop/BACKLOG.md` L1~L8 모두 완료 |
 | git | 브랜치 `main`, **원격 저장소 없음**. 다른 PC로 옮기려면 폴더째 복사하거나 원격을 추가한다 |

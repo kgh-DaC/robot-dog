@@ -28,6 +28,10 @@ class FakeRobot:
         self.zeroed = True
         self.noise = []          # extra roll per IMU read (models a robot being moved)
         self.fail_on = None      # command prefix that gets no answer
+        self.arm_after_sets = None   # another controller arms after this many TRIM SETs
+        self.rezero_after_sets = None
+        self.sets = 0
+        self.lose_save_reply = False
         self.log = []
 
     def tilt(self):
@@ -61,9 +65,18 @@ class FakeRobot:
             if self.armed:
                 raise lc.CalibrationError("ERR controlled_by_remote")
             self.trim = [float(v) for v in parts[2:]]
+            self.sets += 1
+            if self.sets == self.arm_after_sets:
+                self.armed = True
+            if self.sets == self.rezero_after_sets:
+                self.zeroed = False
             return "OK TRIM SET"
         if command == "TRIM SAVE":
+            if self.armed:
+                raise lc.CalibrationError("ERR controlled_by_remote")
             self.saved = list(self.trim)
+            if self.lose_save_reply:
+                raise lc.CalibrationError("no answer")
             return "OK TRIM SAVE"
         raise AssertionError(command)
 
@@ -163,6 +176,23 @@ class CalibratorTest(unittest.TestCase):
         with self.assertRaises(lc.CalibrationError):
             run(robot)
         self.assertFalse([c for c in robot.log if c.startswith("TRIM S")])
+
+    def test_arm_or_imu_change_during_the_run_stops_without_saving(self):
+        for change in ("arm_after_sets", "rezero_after_sets"):
+            robot = FakeRobot(roll0=6.0, pitch0=-3.0)
+            setattr(robot, change, 1)
+            with self.assertRaises(lc.CalibrationError):
+                run(robot)
+            self.assertEqual(robot.saved, robot.base, change)
+            self.assertNotIn("TRIM SAVE", robot.log)
+
+    def test_lost_save_reply_is_reported_as_saved(self):
+        robot = FakeRobot()
+        robot.lose_save_reply = True
+        result = run(robot)
+        self.assertTrue(result["saved"])
+        self.assertEqual(robot.saved, result["final"])
+        self.assertEqual(robot.trim, result["final"])   # not rolled back while flash holds the new trim
 
     def test_lost_link_after_a_step_tries_to_restore(self):
         robot = FakeRobot()

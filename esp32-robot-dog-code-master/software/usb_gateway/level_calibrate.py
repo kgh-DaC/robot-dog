@@ -137,6 +137,20 @@ class Calibrator:
         if imu.get("zeroed") != "1" or "NONE" in (imu.get("rollmap", "NONE"), imu.get("pitchmap", "NONE")):
             raise CalibrationError("IMU 영점(IMUZERO)이나 축 설정(IMUMAP)이 저장되어 있지 않습니다.")
 
+    def reference(self) -> tuple:
+        """What must not change during a run: nobody arms the robot and nobody
+        re-zeroes or re-maps the IMU (possible from the Wi-Fi page). The zero
+        itself is not reported, so the raw-minus-zero offset is not checked;
+        the flags and the axis map are."""
+        state = fields(self.robot.ask("STATE", "STATE "))
+        imu = fields(self.robot.ask("IMU", "IMU "))
+        return (state.get("armed"), state.get("walk"), state.get("homing"),
+                imu.get("zeroed"), imu.get("rollmap"), imu.get("pitchmap"))
+
+    def check_unchanged(self, reference: tuple) -> None:
+        if self.reference() != reference:
+            raise CalibrationError("보정 중에 로봇 상태나 IMU 설정이 바뀌었습니다 (웹 페이지에서 조작했는지 확인하세요).")
+
     def read_trim(self) -> list[float]:
         return parse_trim(fields(self.robot.ask("TRIM", "TRIM "))["cur"])
 
@@ -184,6 +198,7 @@ class Calibrator:
         if max(abs(roll), abs(pitch)) > START_TILT_MAX_DEG:
             raise CalibrationError("기울기가 너무 큽니다. 바닥과 로봇 자세를 확인하세요.")
 
+        reference = self.reference()
         trim, steps = list(start), 0
         best = max(abs(roll), abs(pitch))
         try:
@@ -196,6 +211,7 @@ class Calibrator:
                     raise CalibrationError(f"한 번에 허용한 조정 범위(다리당 ±{CHANGE_MAX_DEG:.0f}°)를 넘습니다.")
                 if any(abs(v) > TRIM_LIMIT_DEG for v in trim):
                     raise CalibrationError(f"보정값 한계(±{TRIM_LIMIT_DEG:.0f}°)를 넘습니다.")
+                self.check_unchanged(reference)
                 steps += 1
                 self.apply_trim(trim)
                 roll, pitch = self.measure()
@@ -206,7 +222,14 @@ class Calibrator:
                 best = min(best, tilt)
             saved = False
             if save and steps > 0:
-                self.robot.ask("TRIM SAVE", "OK TRIM SAVE")
+                self.check_unchanged(reference)
+                try:
+                    self.robot.ask("TRIM SAVE", "OK TRIM SAVE")
+                except CalibrationError:
+                    # The reply may be lost after the robot did save: report what is really stored.
+                    stored = parse_trim(fields(self.robot.ask("TRIM", "TRIM "))["saved"])
+                    if stored != trim:
+                        raise
                 saved = True
         except BaseException:
             if steps > 0:
@@ -244,6 +267,7 @@ def main(argv=None) -> int:
     if not args.check and not args.yes:
         print("로봇이 평평한 바닥에 네 발로 서 있고, 서보 전원이 켜져 있으며, 아무도 만지지 않아야 합니다.")
         print("다리가 조금씩 천천히 움직입니다. 전원 스위치에 손이 닿는 곳에 있으세요.")
+        print("보정이 끝날 때까지 웹 페이지에서 로봇을 조작하지 마세요.")
         if input("시작할까요? (y/N) ").strip().lower() != "y":
             return 1
     try:
