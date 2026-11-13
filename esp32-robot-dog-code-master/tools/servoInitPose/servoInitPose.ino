@@ -21,7 +21,7 @@ ServoConfig servos[] = {
   {25, 90, 2, false, 0}, {26, 45, 1, true,  0}, {27, 90, 1, true,  0},
   {16, 90, 2, true,  0}, {18, 45, 1, false, 0}, {17, 90, 1, false, 0},
   {13, 90, 2, true,  0}, {12, 45, 1, true,  0}, {14, 90, 1, true,  0},
-  { 4, 90, 2, false, 0}, { 2, 45, 1, false, 0}, {15, 90, 1, false, 0}
+  { 4, 86, 2, false, 0}, { 2, 45, 1, false, 0}, {15, 90, 1, false, 0}
 };
 
 // Standing-pose GAMMA trim per leg (LF, RF, LH, RH), logical degrees, added to
@@ -216,7 +216,7 @@ int jointIndex(const char *name)
 
 bool validAngle(int servoIndex, int angle)
 {
-  int base = servoIndex % 3 == 1 ? 45 : 90;
+  int base = neutralAngle(servoIndex);
   return angle >= base - MAX_JOINT_OFFSET && angle <= base + MAX_JOINT_OFFSET;
 }
 
@@ -226,8 +226,11 @@ void setTargetAngle(int servoIndex, int angle)
   targetPulses[servoIndex] = pulseForServo(servoIndex);
 }
 
+// Initial (neutral) angle per joint. RH ALPHA (index 9) is 86 by user request
+// 2026-11-13; all other joints keep 90 (ALPHA/GAMMA) or 45 (BETA).
 int neutralAngle(int servoIndex)
 {
+  if (servoIndex == 9) return 86;
   return servoIndex % 3 == 1 ? 45 : 90;
 }
 

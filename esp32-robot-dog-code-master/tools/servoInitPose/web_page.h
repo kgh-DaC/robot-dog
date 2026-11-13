@@ -13,7 +13,7 @@ const char ROBOT_CONTROL_PAGE[] PROGMEM = R"HTML(<!doctype html>
 @media (prefers-color-scheme:dark){:root{--bg:#14171a;--card:#1d2125;--ink:#e8ebee;--muted:#9aa4ad;--line:#30363c;--go:#2e9b66;--warn:#e0a030;--stop:#e04848;--active:#5b9cf5;color-scheme:dark}}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 system-ui,-apple-system,"Segoe UI","Malgun Gothic",sans-serif;padding:16px}
-main{max-width:720px;margin:0 auto;display:grid;gap:14px}
+main{max-width:1100px;margin:0 auto;display:grid;gap:14px}
 h1{font-size:20px;margin:0}
 .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px}
 .top{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between}
@@ -63,6 +63,11 @@ h2{font-size:16px;margin:0}
 .sub{font-size:13px;color:var(--muted);margin:10px 0 2px}
 .sum{font-size:14px;margin:8px 0}
 td small{color:var(--muted)}
+.stage{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(280px,1fr);gap:14px;align-items:start}
+.stage>.card,.ctrl>.card{min-width:0}
+.ctrl{display:grid;gap:14px}
+.home{width:100%;margin-top:8px;border-color:var(--active);color:var(--active);font-weight:600}
+@media (max-width:820px){.stage{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
@@ -72,8 +77,36 @@ td small{color:var(--muted)}
     <span id="link" class="badge bad"><span class="dot"></span><span id="linkText">연결 확인 중</span></span>
   </div>
 
+  <div class="stage">
+  <section class="card" id="modelCard">
+    <div class="lvhead">
+      <h2>관절 모형</h2>
+      <div class="seg">
+        <button id="mdV3d">3D</button>
+        <button id="mdVSide">옆</button>
+        <button id="mdVFront">앞</button>
+        <button id="mdVTop">위</button>
+      </div>
+    </div>
+    <div class="chartwrap">
+      <canvas id="mdCanvas" role="img" aria-label="관절 각도로 그린 네 다리 모형"></canvas>
+    </div>
+    <div class="seg" style="margin:8px 0">
+      <button id="mdCorr">보정 포함</button>
+      <button id="mdGhost">중립 자세 겹쳐 보기</button>
+    </div>
+    <div class="scroll"><table>
+      <thead><tr><th>다리</th><th>ALPHA</th><th>BETA</th><th>GAMMA</th><th>무릎 x, y, z (mm)</th><th>발 x, y, z (mm)</th></tr></thead>
+      <tbody id="joints"></tbody>
+    </table></div>
+    <p class="note">명령한 관절 목표각(도)으로 계산한 모형입니다. 몸통은 고정이고 다리 모양만 보여 주며, 바닥에 닿았는지는 나타내지 않습니다. 서보에는 위치 피드백이 없어 실제 자세와 다를 수 있습니다. 좌표는 몸통 중심 기준입니다 (x 오른쪽, y 앞, z 위). 3D 보기는 끌어서 돌릴 수 있습니다. 치수: 윗다리 51.9 mm, 아랫다리 50 mm, 좌우 어깨 간격 80 mm, 앞뒤 어깨 간격 141 mm(미실측). “보정 포함”은 수평 유지 보정과 서 있는 자세 보정(다리별 GAMMA)을 더한, 서보에 실제로 보내는 각도입니다.</p>
+    <p class="note" id="mdTrim"></p>
+  </section>
+
+  <aside class="ctrl">
   <section class="card">
     <button id="stop" class="stop">■ 긴급 정지 (Space)</button>
+    <button id="home" class="home">⟲ 초기 위치로 복귀</button>
   </section>
 
   <section class="card">
@@ -91,6 +124,9 @@ td small{color:var(--muted)}
     <p id="msg" class="msg"></p>
     <p class="note">활성화 후 방향 버튼을 누르면 계속 걷고, 같은 버튼을 다시 누르거나 “보행 멈춤”을 누르면 멈춥니다. 이 페이지가 1초 이상 응답하지 않거나(탭 전환·창 닫기·연결 끊김 포함) 다른 곳에서 정지하면 로봇은 스스로 멈추고 비활성화됩니다. 재접속 후에는 다시 활성화해야 합니다. 긴급 정지·비활성화·자동 정지 때 모든 관절은 중립 자세(90/45/90)로 천천히 돌아갑니다. 노트북으로 잡아 둔 자세도 중립으로 바뀝니다.</p>
   </section>
+
+  </aside>
+  </div>
 
   <section class="card" id="levelCard">
     <div class="lvhead">
@@ -160,31 +196,6 @@ td small{color:var(--muted)}
       <div class="kv">마지막 정지 원인<b id="sStop">-</b></div>
       <div class="kv">마지막 리셋 원인<b id="sReset">-</b></div>
     </div>
-  </section>
-
-  <section class="card" id="modelCard">
-    <div class="lvhead">
-      <h2>관절 모형</h2>
-      <div class="seg">
-        <button id="mdV3d">3D</button>
-        <button id="mdVSide">옆</button>
-        <button id="mdVFront">앞</button>
-        <button id="mdVTop">위</button>
-      </div>
-    </div>
-    <div class="chartwrap">
-      <canvas id="mdCanvas" role="img" aria-label="관절 각도로 그린 네 다리 모형"></canvas>
-    </div>
-    <div class="seg" style="margin:8px 0">
-      <button id="mdCorr">보정 포함</button>
-      <button id="mdGhost">중립 자세 겹쳐 보기</button>
-    </div>
-    <div class="scroll"><table>
-      <thead><tr><th>다리</th><th>ALPHA</th><th>BETA</th><th>GAMMA</th><th>무릎 x, y, z (mm)</th><th>발 x, y, z (mm)</th></tr></thead>
-      <tbody id="joints"></tbody>
-    </table></div>
-    <p class="note">명령한 관절 목표각(도)으로 계산한 모형입니다. 몸통은 고정이고 다리 모양만 보여 주며, 바닥에 닿았는지는 나타내지 않습니다. 서보에는 위치 피드백이 없어 실제 자세와 다를 수 있습니다. 좌표는 몸통 중심 기준입니다 (x 오른쪽, y 앞, z 위). 3D 보기는 끌어서 돌릴 수 있습니다. 치수: 윗다리 51.9 mm, 아랫다리 50 mm, 좌우 어깨 간격 80 mm, 앞뒤 어깨 간격 141 mm(미실측). “보정 포함”은 수평 유지 보정과 서 있는 자세 보정(다리별 GAMMA)을 더한, 서보에 실제로 보내는 각도입니다.</p>
-    <p class="note" id="mdTrim"></p>
   </section>
 
   <section class="card" id="wifiCard" hidden>
@@ -557,7 +568,7 @@ td small{color:var(--muted)}
     var bad = cssVar("--stop");
     LEG_IDS.forEach(function (leg) {
       var side = LEG_POS[leg][0], color = cssVar(side < 0 ? "--series-1" : "--series-2");
-      var n = fkLeg(leg, NEUTRAL[0], NEUTRAL[1], NEUTRAL[2]);
+      var n = fkLeg(leg, leg === "RH" ? 86 : NEUTRAL[0], NEUTRAL[1], NEUTRAL[2]);  // RH ALPHA 초기값 86
       seg([side * GEO.BW, n.hip[1], 0], n.hip, 12 * k + 4, muted);                 // shoulder block
       if (md.ghost) { seg(n.hip, n.knee, 1.5, muted, [4, 4]); seg(n.knee, n.foot, 1.5, muted, [4, 4]); }
       var a = angles[leg];
@@ -764,6 +775,7 @@ td small{color:var(--muted)}
 
   $("stop").onclick = function () { stop(); };
   $("arm").onclick = function () { command({ cmd: "ARM" }, "활성화됨. 방향 버튼을 누르세요. 처음에는 짧게 시험하세요."); };
+  $("home").onclick = function () { stop("초기 위치(중립 90/45/90, RH ALPHA 86)로 복귀 중입니다. 움직임은 비활성화됩니다."); };
   $("disarm").onclick = function () { command({ cmd: "DISARM" }, "비활성화했습니다."); };
   Array.prototype.forEach.call(document.querySelectorAll("[data-dir]"), function (b) {
     b.onclick = function () {
