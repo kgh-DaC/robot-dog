@@ -619,6 +619,12 @@ void processCommand(char *line)
     return;
   }
 
+  if (strcmp(command, "I2CDIAG") == 0) {  // read-only wiring diagnostics, blocks a few seconds
+    if (!imuSafeToBlock()) Serial.println("ERR walking_active");
+    else printI2cDiag();
+    return;
+  }
+
   if (strcmp(command, "I2CREAD") == 0) {  // diagnostics, read only: I2CREAD 69 75 [n]
     char *addrText = strtok_r(NULL, " \t", &save);
     char *regText = strtok_r(NULL, " \t", &save);

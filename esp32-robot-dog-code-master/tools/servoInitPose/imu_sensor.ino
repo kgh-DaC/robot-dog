@@ -242,6 +242,54 @@ void imuSetup()
   imuProbeAndInit();
 }
 
+// "I2CDIAG": read-only wiring diagnostics for a bus where nothing answers.
+// Blocks for up to a few seconds, so processCommand() only runs it while
+// nothing can move. Reads each line with no pull, with the internal pull-up and
+// with the internal pull-down, then scans at 100 kHz and at 400 kHz.
+//   line reads 1 even with the pull-down -> an external pull-up is there
+//     (module connected and powered)
+//   line follows the internal pull (up=1, down=0) -> nothing is connected to it
+//   line reads 0 even with the pull-up -> shorted to GND, or the module has no
+//     power (its pull-up resistor then pulls the line down)
+void i2cDiagScan(uint32_t hz)
+{
+  Wire.begin(IMU_SDA_PIN, IMU_SCL_PIN, hz);
+  Wire.setTimeOut(10);
+  uint8_t found = 0;
+  for (uint8_t addr = 1; addr < 127; addr++) {
+    if (i2cPresent(addr)) {
+      Serial.printf("%s0x%02X", found ? "," : "", addr);
+      found++;
+    }
+  }
+  if (!found) Serial.print("none");
+  Wire.end();
+}
+
+void printI2cDiag()
+{
+  Wire.end();
+  int level[2][3];
+  const uint8_t pins[2] = {IMU_SDA_PIN, IMU_SCL_PIN};
+  const uint8_t modes[3] = {INPUT, INPUT_PULLUP, INPUT_PULLDOWN};
+  for (int line = 0; line < 2; line++) {
+    for (int mode = 0; mode < 3; mode++) {
+      pinMode(pins[line], modes[mode]);
+      delay(5);
+      level[line][mode] = digitalRead(pins[line]);
+    }
+    pinMode(pins[line], INPUT);
+  }
+  Serial.printf("I2CDIAG sda=%d/%d/%d scl=%d/%d/%d (none/pullup/pulldown) scan100k=",
+                level[0][0], level[0][1], level[0][2], level[1][0], level[1][1], level[1][2]);
+  i2cDiagScan(100000);
+  Serial.print(" scan400k=");
+  i2cDiagScan(400000);
+  Serial.println();
+  Wire.begin(IMU_SDA_PIN, IMU_SCL_PIN, 400000);  // back to the normal setup
+  Wire.setTimeOut(10);
+}
+
 // --- Recovery -----------------------------------------------------------------
 // Seen on hardware: the module's AD0 pin is not tied, so the chip moved from
 // 0x68 (at boot) to 0x69 and every later read failed. Recovery:
