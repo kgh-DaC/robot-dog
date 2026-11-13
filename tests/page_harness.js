@@ -53,7 +53,7 @@ const sim = { levelEnabled: true, levelActive: true, roll: null, pitch: null, wa
 let imuMapped = true;
 const posts = [];
 const statusUrls = [];
-let held = null;             // gateway: a held USB status reply, released by the test
+let held = null, heldPost = null;             // gateway: a held USB status reply, released by the test
 const GW_WIFI = { ssid: "RobotDog-ABCD", password: "12345678",
   sta: { status: "CONNECTED", ip: "172.20.10.3", ssid: "민수의 iPhone", host: "robotdog.local" } };
 const okStatus = () => ({
@@ -103,6 +103,7 @@ const context = {
   fetch(url, opts) {
     if (opts && opts.method === "POST") {
       posts.push({ t: now, body: opts.body, url });
+      if (sim.holdPost) return new Promise((resolve) => { heldPost = () => resolve(response({ ok: true })); });
       return Promise.resolve(response({ ok: true }));
     }
     statusUrls.push(url);
@@ -192,6 +193,17 @@ if (MODE === "gateway") (async () => {
   el("cmUsb").onclick();
   await advance(600);
   g.back = Object.assign(connView(), { stored: context.__ls["robotdog.conn"] });
+  // A command still waiting for its reply blocks a mode switch.
+  sim.holdPost = true;
+  el("arm").onclick();
+  await advance(50);
+  el("cmHot").onclick();
+  await advance(50);
+  g.busy = connView();
+  sim.holdPost = false;
+  heldPost();
+  await advance(300);
+  g.afterBusy = connView();
   // Reload with hotspot mode saved: the page starts on the robot's address.
   context.__ls["robotdog.conn"] = JSON.stringify({ mode: "hot", host: "robotdog.local" });
   timers.forEach((t) => { t.dead = true; });   // the old page instance is gone

@@ -358,6 +358,14 @@ class ConnectionModeTests(unittest.TestCase):
         self.assertTrue(r["url"].startswith("http://robotdog.local/api/status?"))
         self.assertEqual(r["addr"], "robotdog.local")
 
+    def test_switch_refused_while_a_command_waits_for_its_reply(self):
+        self.assertIn("명령을 처리하는 중", self.g["busy"]["msg"])
+        self.assertTrue(self.g["busy"]["url"].startswith("api/status?"))
+        self.assertTrue(self.g["afterBusy"]["target"].startswith("USB"))
+
+    def test_gateway_on_allowed_origin_has_no_cors_warning(self):
+        self.assertNotIn("주의", self.g["hot"]["note"])
+
     def test_robot_served_page_only_explains_usb(self):
         self.assertTrue(self.robot["initial"]["addrRowHidden"])
         v = self.robot["usb"]

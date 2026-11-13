@@ -631,6 +631,25 @@ class FirmwareSourceTests(unittest.TestCase):
         # Cross-origin calls are approved only for the loopback gateway page.
         self.assertIn('{"http://127.0.0.1:8787", "http://localhost:8787"}', src)
 
+    def test_hotspot_join_is_abandoned_when_armed(self):
+        web = (self.SKETCH / "web_control.ino").read_text(encoding="utf-8")
+        svc = web[web.index("void wifiStaService()"):]
+        svc = svc[:svc.index("\n}\n")]
+        abort = svc.index("if (armed && staTrying)")
+        self.assertIn("staStop();", svc[abort:abort + 200])
+        self.assertIn("if (!armed && (int32_t)(now - staNextMs) >= 0) staBegin(now);", svc)
+        self.assertIn("ipNow != staIpRaw", svc)              # DHCP renewal updates the address
+        for fn in ("const char *wifiStaSet(", "const char *wifiStaClear()"):
+            body = web[web.index(fn):]
+            self.assertIn('if (armed) return "armed";', body[:body.index("\n}\n")])
+
+    def test_overlong_serial_line_tail_is_discarded(self):
+        main = (self.SKETCH / "servoInitPose.ino").read_text(encoding="utf-8")
+        body = main[main.index("void readSerialCommands()"):]
+        body = body[:body.index("\n}\n")]
+        self.assertIn("discarding = true;", body)
+        self.assertIn("if (!discarding) {", body)
+
     def test_web_server_runs_outside_the_safety_loop(self):
         main = (self.SKETCH / "servoInitPose.ino").read_text(encoding="utf-8")
         loop = main[main.index("void loop()"):]

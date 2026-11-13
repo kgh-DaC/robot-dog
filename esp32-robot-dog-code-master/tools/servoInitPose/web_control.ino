@@ -59,6 +59,7 @@ bool staTrying = false;
 uint32_t staAttemptMs = 0;
 uint32_t staNextMs = 0;
 char staIp[16] = "";                             // written in loop(), read by the web task
+uint32_t staIpRaw = 0;                           // staIp as a number, to notice a changed address
 
 const char *staStateName(int value)  // int: Arduino prototypes precede the enum
 {
@@ -154,6 +155,7 @@ void staStop()
   WiFi.disconnect(false, true);  // keep the radio (AP) on, forget the STA config
   staTrying = false;
   staIp[0] = '\0';
+  staIpRaw = 0;
 }
 
 // Called from loop() with controlMutex held. Gives up a failed join after
@@ -165,8 +167,11 @@ void wifiStaService()
   const uint32_t now = millis();
   const wl_status_t status = WiFi.status();
   if (status == WL_CONNECTED) {
-    if (staState != STA_CONNECTED) {
+    // Also catches a new address after a DHCP renewal (Host check and status follow it).
+    const uint32_t ipNow = (uint32_t)WiFi.localIP();
+    if (staState != STA_CONNECTED || ipNow != staIpRaw) {
       WiFi.localIP().toString().toCharArray(staIp, sizeof(staIp));
+      staIpRaw = ipNow;
       staState = STA_CONNECTED;
       staTrying = false;
       Serial.print("EVENT WIFI_STA connected ip=");
@@ -174,8 +179,16 @@ void wifiStaService()
     }
     return;
   }
+  if (armed && staTrying) {         // armed during a join: stop scanning now, retry after STOP
+    staStop();
+    staState = STA_FAILED;
+    staNextMs = now;
+    Serial.println("EVENT WIFI_STA FAILED armed");
+    return;
+  }
   if (staState == STA_CONNECTED) {  // hotspot went away
     staIp[0] = '\0';
+    staIpRaw = 0;
     staState = STA_FAILED;
     staNextMs = now;                // retry at once (subject to the armed check)
     Serial.println("EVENT WIFI_STA lost");

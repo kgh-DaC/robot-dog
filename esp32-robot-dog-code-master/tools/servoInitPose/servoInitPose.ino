@@ -792,17 +792,24 @@ void processCommand(char *line)
 
 void readSerialCommands()
 {
+  static bool discarding = false;  // after an overflow, drop the rest of that line (never run its tail)
   while (Serial.available() > 0) {
     char value = Serial.read();
     if (value == '\r') continue;
     if (value == '\n') {
-      commandBuffer[commandLength] = '\0';
-      processCommand(commandBuffer);
+      if (!discarding) {
+        commandBuffer[commandLength] = '\0';
+        processCommand(commandBuffer);
+      }
       commandLength = 0;
+      discarding = false;
+    } else if (discarding) {
+      continue;
     } else if (commandLength < sizeof(commandBuffer) - 1) {
       commandBuffer[commandLength++] = value;
     } else {
       commandLength = 0;
+      discarding = true;
       Serial.println("ERR command_too_long");
     }
   }
