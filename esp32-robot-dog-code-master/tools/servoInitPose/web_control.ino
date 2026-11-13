@@ -395,8 +395,8 @@ void handleStatus()
     formatStaJson(sta, sizeof(sta));
     char trim[96];  // worst case 58 B: {"LF":-99.9,"RF":-99.9,"LH":-99.9,"RH":-99.9}
     snprintf(trim, sizeof(trim), "{\"LF\":%.1f,\"RF\":%.1f,\"LH\":%.1f,\"RH\":%.1f}",
-             STAND_GAMMA_TRIM_DEG[0], STAND_GAMMA_TRIM_DEG[1], STAND_GAMMA_TRIM_DEG[2],
-             STAND_GAMMA_TRIM_DEG[3]);
+             standGammaTrimDeg[0], standGammaTrimDeg[1], standGammaTrimDeg[2],
+             standGammaTrimDeg[3]);
     snprintf(body, sizeof(body),
              "{\"link\":\"wifi\",\"connected\":true,\"armed\":%s,\"controller\":\"%s\","
              "\"youControl\":%s,\"walk\":\"%s\",\"homing\":%s,\"settled\":%s,"

@@ -13,17 +13,24 @@ ESP32 사족 로봇개(12개 서보, 다리당 3관절)를 웹 페이지 하나�
 ## 2. 지금 상태
 | 항목 | 상태 |
 | --- | --- |
-| 펌웨어 | 커밋 `4ced7eb`(핫스팟 지원)을 **보드에 업로드 완료**, 해시 검증·부팅 확인(읽기 전용) 통과 |
+| 펌웨어 | 수평 보정(`TRIM`) 펌웨어를 2026-11-13 **보드에 업로드 완료**, 해시 검증·부팅 확인(읽기 전용) 통과: `CAPS ... TRIM1`, `TRIM cur=9.0/1.0/-1.0/-9.0 source=DEFAULT`, IMU 영점·축 설정 유지됨 |
+| 수평 보정 | 2026-11-13 추가: 펌웨어 `TRIM` 명령 + `level_calibrate.py`. 테스트·컴파일·업로드 완료. **실물 보정은 못 함: IMU가 I2C에서 응답하지 않음** (부팅 로그 `I2C none`, `IMU_ERROR not_found`; 업로드 전 게이트웨이에서도 `ready:false`) |
 | 핫스팟 기능 | 코드·QA 완료, **실물 미시험** (핫스팟 설정을 아직 저장하지 않음, `sta=OFF`) |
 | 3단계 보행 | 업로드됨, **바닥 실물 미시험** |
-| 테스트 | `python -m unittest discover tests` → 100개 통과 |
-| 컴파일 | 1,082,259 B (플래시 82%) |
+| 테스트 | `python -m unittest discover tests` → 118개 통과 |
+| 컴파일 | 1,090,823 B (플래시 83%) |
 | 루프 작업 목록 | `_workspace/loop/BACKLOG.md` L1~L8 모두 완료 |
 | git | 브랜치 `main`, **원격 저장소 없음**. 다른 PC로 옮기려면 폴더째 복사하거나 원격을 추가한다 |
 
 마지막 부팅 확인값: `STATE armed=0 walk=STOPPED settled=1`, 관절 90/45/90(RH ALPHA 86), IMU 0x68 정상(영점·축 설정 저장됨, rollmap=-Y pitchmap=+X), 서 있는 자세 보정 trim 9/1/-1/-9, 수평 유지 꺼짐.
 
 ## 3. 다음 할 일 (순서대로, 모두 사람이 로봇 옆에 있어야 함)
+0. **수평 보정 (사용자 요청 2026-11-13: 90/45/90 기준으로 수평이 되는 서보 값을 찾아 초기값으로 저장)**
+   1. (완료) 새 펌웨어 업로드, `TRIM1` 확인.
+   1. **막힌 곳: IMU가 I2C 버스에 없다.** IMU 모듈의 VCC/GND/SDA/SCL 배선과 전원을 확인한다(사람이 해야 함). 직렬 `I2C` 명령에 `0x68`이 나오고 `IMU`가 `ready=1 valid=1`이면 해결된 것이다. 펌웨어는 비활성 상태에서 2초마다 다시 찾는다.
+   2. 평평한 바닥에 세우고 서보 전원 ON, 손을 뗀 뒤 `python esp32-robot-dog-code-master/software/usb_gateway/level_calibrate.py --check`로 기울기 확인.
+   3. 같은 명령을 `--check` 없이 실행 → 최소 조정 후 로봇에 저장. 결과(조정 전후 기울기, 새 보정값)를 이 문서 2절에 적는다.
+   - 설명: `usb_gateway/README.md`의 "서 있는 자세 수평 보정". 수평 기준은 IMU 영점이다.
 1. **핫스팟 실물 시험**
    1. 게이트웨이 실행 후 `http://127.0.0.1:8787` → 아래쪽 "ESP32 Wi-Fi 접속 정보" 카드의 "핫스팟 설정"에 이름·비밀번호 입력 → **저장 후 접속**. 아이폰은 "호환성 최대화" 켜기(2.4 GHz 필수).
    2. "핫스팟 상태"가 `연결됨 · <IP>`인지 확인 (15초 시도, 실패 시 30초마다 재시도).
@@ -64,6 +71,7 @@ arduino-cli compile --fqbn esp32:esp32:esp32 --warnings default .
   %LOCALAPPDATA%\Arduino15\packages\esp32\tools\esptool_py\5.3.1\esptool.exe --chip esp32 --port COM14 --baud 460800 ^
     --before default-reset --after no-reset --connect-attempts 8 write-flash -z 0x10000 <빌드폴더>\servoInitPose.ino.bin
   ```
+- 업로드 뒤 보드가 부트로더에 남아 응답이 없으면(서보 전원이 보드에도 들어가 USB를 다시 꽂아도 리셋되지 않는 경우) RTS를 0.2초 내렸다 올려 리셋한다. 2026-11-13에는 이 방법으로 정상 부팅했고 포트 오류도 없었다.
 - **`merged.bin`(4 MB)은 쓰지 않는다.** 보드에 저장된 자세·IMU 영점·축 설정(NVS)을 덮을 수 있다.
 - 업로드 뒤 리셋하면 USB가 잠깐 끊겼다 돌아온다(`reset=BROWNOUT`/`WDT`가 남음, 리셋 순간 전원 흔들림으로 추정). 포트가 돌아오면 DTR/RTS를 내린 채 열어 `HELLO`, `CAPS`, `STATE`, `STATUS`, `WIFI`, `IMU`, `LEVEL`(읽기 전용)로 확인한다.
 
@@ -76,8 +84,9 @@ arduino-cli compile --fqbn esp32:esp32:esp32 --warnings default .
 | `.../servoInitPose/web_page.h` | `index.html`을 넣은 생성 파일 (직접 고치지 않음) |
 | `esp32-robot-dog-code-master/software/robot_control_web/index.html` | 웹 페이지 하나 (게이트웨이와 로봇이 같은 페이지를 보냄) |
 | `esp32-robot-dog-code-master/software/usb_gateway/usb_gateway.py` | USB 게이트웨이 (루프백 전용, 직렬 ↔ 같은 JSON API) |
+| `esp32-robot-dog-code-master/software/usb_gateway/level_calibrate.py` | 수평 보정 스크립트 (기울기 측정 → 보정값 최소 조정 → `TRIM SAVE`) |
 | `esp32-robot-dog-code-master/software/usb_gateway/README.md` | **사용 설명서**: 경로별 사용법, 안전 규칙, 핫스팟, 수평 유지, 관절 모형, API |
-| `tests/` | `test_usb_gateway.py`(가짜 펌웨어 + 펌웨어 소스 정적 검사), `page_harness.js` + `test_control_page.py`(Node로 페이지 실행), `test_walk_notebook_safety.py` |
+| `tests/` | `test_level_calibrate.py`(수평 보정), `test_usb_gateway.py`(가짜 펌웨어 + 펌웨어 소스 정적 검사), `page_harness.js` + `test_control_page.py`(Node로 페이지 실행), `test_walk_notebook_safety.py` |
 | `robot_dog_*.ipynb` | 사용자가 쓰는 노트북 (서보 조정, IMU 확인, 4방향 보행) |
 | `.claude/` | 하네스: 에이전트(embedded, telemetry, digital-twin, integration-qa), 스킬, 루프 안전 훅 |
 | `_workspace/loop/` | 루프 작업 목록·기록·시작 명령 |

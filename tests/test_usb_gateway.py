@@ -327,7 +327,7 @@ class RobotLinkTests(unittest.TestCase):
         self.assertIn("trim=%.1f/%.1f/%.1f/%.1f", level)
         self.assertIn('\\"standTrimDeg\\":%s', web)
         for text in (level, web):
-            self.assertIn("STAND_GAMMA_TRIM_DEG[3]", text)
+            self.assertIn("standGammaTrimDeg[3]", text)
 
     def test_unknown_imu_values_become_null(self):
         from usb_gateway import parse_imu_line

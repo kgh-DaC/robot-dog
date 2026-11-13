@@ -33,7 +33,18 @@ ServoConfig servos[] = {
 // 2026-11-11 later: after power-up and after each short walk the body settled
 // at roll +1.6..+2.3 (left high, user confirmed by eye), so the left/right
 // split was reduced by ~4 deg (0.45 deg roll per deg GAMMA).
-const float STAND_GAMMA_TRIM_DEG[4] = {9.0f, 1.0f, -1.0f, -9.0f};
+//
+// 2026-11-13: the trim is now a per-robot setting. The values above are only
+// the defaults for a board that has nothing saved. `TRIM SET lf rf lh rh`
+// (serial only, disarmed, not walking) changes it, `TRIM SAVE` stores it in
+// flash (Preferences "standTrim") and every boot loads it before the first
+// servo pulse, so the saved trim is part of this robot's initial pose.
+// software/usb_gateway/level_calibrate.py measures the tilt and finds the trim.
+const float STAND_GAMMA_TRIM_DEFAULT_DEG[4] = {9.0f, 1.0f, -1.0f, -9.0f};
+const float STAND_TRIM_MAX_DEG = 15.0f;   // |trim| limit per leg
+float standGammaTrimDeg[4] = {9.0f, 1.0f, -1.0f, -9.0f};      // in use now
+float standTrimBootDeg[4] = {9.0f, 1.0f, -1.0f, -9.0f};       // what the next boot will use
+bool standTrimFromFlash = false;
 
 const uint8_t SERVO_COUNT = sizeof(servos) / sizeof(servos[0]);
 const uint16_t SERVO_MIN = 600;
@@ -137,7 +148,7 @@ float levelOffsetDeg[SERVO_COUNT] = {0};
 
 uint16_t pulseForServo(uint8_t servoIndex)
 {
-  const double standTrim = servoIndex % 3 == 2 ? STAND_GAMMA_TRIM_DEG[servoIndex / 3] : 0.0;
+  const double standTrim = servoIndex % 3 == 2 ? standGammaTrimDeg[servoIndex / 3] : 0.0;
   const double commanded = servos[servoIndex].targetAngle + levelOffsetDeg[servoIndex] + standTrim;
   double angle = (commanded - 90) * M_PI / 180.0 * servos[servoIndex].gearRatio + M_PI_2;
   if (servos[servoIndex].inverse) angle = M_PI - angle;
@@ -232,6 +243,75 @@ int neutralAngle(int servoIndex)
 {
   if (servoIndex == 9) return 86;
   return servoIndex % 3 == 1 ? 45 : 90;
+}
+
+// --- Standing-pose trim (per robot, stored in flash) ---------------------------
+bool standTrimValid(const float *values)
+{
+  for (int leg = 0; leg < 4; leg++) {
+    if (!isfinite(values[leg]) || fabsf(values[leg]) > STAND_TRIM_MAX_DEG) return false;
+  }
+  return true;
+}
+
+// Called from setup() before the first servo pulse. Anything missing or out of
+// range keeps the compiled defaults.
+void loadStandTrim()
+{
+  Preferences store;
+  if (!store.begin("standTrim", true)) return;  // nothing saved yet
+  float values[4];
+  const bool ok = store.isKey("deg") && store.getBytes("deg", values, sizeof(values)) == sizeof(values) &&
+                  standTrimValid(values);
+  store.end();
+  if (!ok) return;
+  memcpy(standGammaTrimDeg, values, sizeof(values));
+  memcpy(standTrimBootDeg, values, sizeof(values));
+  standTrimFromFlash = true;
+}
+
+// Trim changes move the legs (slewed like SET), so they follow the SET rules.
+const char *standTrimBlocked()
+{
+  if (armed) return "controlled_by_remote";
+  if (walkDirection != WALK_STOPPED) return "walking_active";
+  if (startupHoming) return "homing_in_progress";
+  return NULL;
+}
+
+// Applies the trim now (not saved: a reboot returns to the saved trim).
+const char *standTrimSet(const float *values)
+{
+  const char *blocked = standTrimBlocked();
+  if (blocked != NULL) return blocked;
+  if (!standTrimValid(values)) return "trim_out_of_range";
+  memcpy(standGammaTrimDeg, values, sizeof(standGammaTrimDeg));
+  for (int leg = 0; leg < 4; leg++) {
+    targetPulses[leg * 3 + 2] = pulseForServo(leg * 3 + 2);
+  }
+  return NULL;
+}
+
+const char *standTrimSave()
+{
+  const char *blocked = standTrimBlocked();
+  if (blocked != NULL) return blocked;
+  Preferences store;
+  if (!store.begin("standTrim", false)) return "flash_error";
+  const bool ok = store.putBytes("deg", standGammaTrimDeg, sizeof(standGammaTrimDeg)) == sizeof(standGammaTrimDeg);
+  store.end();
+  if (!ok) return "flash_error";
+  memcpy(standTrimBootDeg, standGammaTrimDeg, sizeof(standTrimBootDeg));
+  standTrimFromFlash = true;
+  return NULL;
+}
+
+void printStandTrim()
+{
+  Serial.printf("TRIM cur=%.1f/%.1f/%.1f/%.1f saved=%.1f/%.1f/%.1f/%.1f source=%s max=%.1f\n",
+                standGammaTrimDeg[0], standGammaTrimDeg[1], standGammaTrimDeg[2], standGammaTrimDeg[3],
+                standTrimBootDeg[0], standTrimBootDeg[1], standTrimBootDeg[2], standTrimBootDeg[3],
+                standTrimFromFlash ? "FLASH" : "DEFAULT", STAND_TRIM_MAX_DEG);
 }
 
 // Pose for the current (walkPhase, walkStep). The swing pair S ends its stance
@@ -504,7 +584,7 @@ void processCommand(char *line)
   }
 
   if (strcmp(command, "CAPS") == 0) {
-    Serial.println("CAPS SERVO_POSE_V1 WALK4 LEASE1 WIFI1 IMU1 LEVEL1 STA1");
+    Serial.println("CAPS SERVO_POSE_V1 WALK4 LEASE1 WIFI1 IMU1 LEVEL1 STA1 TRIM1");
     return;
   }
 
@@ -691,6 +771,38 @@ void processCommand(char *line)
     }
     Serial.print("OK PIN LF GAMMA ");
     Serial.println(pin);
+    return;
+  }
+
+  if (strcmp(command, "TRIM") == 0) {  // TRIM | TRIM SET lf rf lh rh | TRIM SAVE
+    char *mode = strtok_r(NULL, " \t", &save);
+    if (mode == NULL) {
+      printStandTrim();
+      return;
+    }
+    const bool set = strcmp(mode, "SET") == 0;
+    const char *error = NULL;
+    if (set) {
+      float values[4] = {0, 0, 0, 0};
+      for (int leg = 0; leg < 4 && error == NULL; leg++) {
+        char *text = strtok_r(NULL, " \t", &save);
+        char *end = NULL;
+        if (text != NULL) values[leg] = strtof(text, &end);
+        if (text == NULL || end == text || *end != '\0') error = "format_USE_TRIM_SET_lf_rf_lh_rh";
+      }
+      if (error == NULL && strtok_r(NULL, " \t", &save) != NULL) error = "format_USE_TRIM_SET_lf_rf_lh_rh";
+      if (error == NULL) error = standTrimSet(values);
+    } else if (strcmp(mode, "SAVE") == 0 && strtok_r(NULL, " \t", &save) == NULL) {
+      error = standTrimSave();
+    } else {
+      error = "format_USE_TRIM_SET_or_TRIM_SAVE";
+    }
+    if (error != NULL) {
+      Serial.print("ERR ");
+      Serial.println(error);
+      return;
+    }
+    Serial.println(set ? "OK TRIM SET" : "OK TRIM SAVE");
     return;
   }
 
@@ -912,6 +1024,7 @@ void setup()
   // Hobby servos have no position feedback: start from the last settled pose
   // saved in flash (where the servos most likely still are) and slew slowly to
   // neutral. Without a valid saved pose, fall back to neutral directly.
+  loadStandTrim();  // this robot's saved standing trim is part of the neutral pose
   poseStoreReady = poseStore.begin("servoPose", false);
   const bool restored = loadSavedPulses(savedPulses);
   for (int i = 0; i < SERVO_COUNT; i++) {

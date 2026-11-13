@@ -221,8 +221,8 @@ void printLevel()
                 levelEnabled ? 1 : 0, levelActive() ? 1 : 0, levelSensorUsable() ? 1 : 0,
                 levelRollComp, levelPitchComp, levelOffsetDeg[2], levelOffsetDeg[5],
                 levelOffsetDeg[8], levelOffsetDeg[11], LEVEL_MAX_COMP_DEG, LEVEL_TILT_LIMIT_DEG,
-                STAND_GAMMA_TRIM_DEG[0], STAND_GAMMA_TRIM_DEG[1], STAND_GAMMA_TRIM_DEG[2],
-                STAND_GAMMA_TRIM_DEG[3]);
+                standGammaTrimDeg[0], standGammaTrimDeg[1], standGammaTrimDeg[2],
+                standGammaTrimDeg[3]);
 }
 
 void formatLevelJson(char *out, size_t size)
