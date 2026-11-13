@@ -68,6 +68,9 @@ td small{color:var(--muted)}
 .ctrl{display:grid;gap:14px}
 .home{width:100%;margin-top:8px;border-color:var(--active);color:var(--active);font-weight:600}
 @media (max-width:820px){.stage{grid-template-columns:1fr}}
+input{font:inherit;border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--ink);padding:10px;min-width:0}
+.row>input{flex:3 1 180px}
+.target{font-family:ui-monospace,Consolas,monospace;font-size:13px}
 </style>
 </head>
 <body>
@@ -76,6 +79,22 @@ td small{color:var(--muted)}
     <h1>로봇개 보행 제어</h1>
     <span id="link" class="badge bad"><span class="dot"></span><span id="linkText">연결 확인 중</span></span>
   </div>
+
+  <section class="card" id="connCard">
+    <div class="lvhead">
+      <h2>연결 방법</h2>
+      <div class="seg">
+        <button id="cmUsb">USB 게이트웨이</button>
+        <button id="cmHot">핫스팟 Wi-Fi</button>
+      </div>
+    </div>
+    <div class="row" id="hsAddrRow" hidden>
+      <input id="hsAddr" placeholder="로봇 주소 (예: 172.20.10.3 또는 robotdog.local)" autocomplete="off" spellcheck="false" aria-label="로봇 주소">
+      <button id="hsGo">이 주소로 접속</button>
+    </div>
+    <p class="note" style="margin-top:8px">현재 대상: <span id="connTarget" class="target">-</span></p>
+    <p class="note" id="connNote"></p>
+  </section>
 
   <div class="stage">
   <section class="card" id="modelCard">
@@ -200,6 +219,19 @@ td small{color:var(--muted)}
 
   <section class="card" id="wifiCard" hidden>
     <div class="kv">ESP32 Wi-Fi 접속 정보 (USB 게이트웨이에서만 표시)<b id="wifiInfo" class="wifi">-</b></div>
+    <div id="hsSet" hidden style="margin-top:14px">
+      <h2>핫스팟 설정</h2>
+      <div class="kv" style="margin:6px 0 10px">핫스팟 상태<b id="hsState">-</b></div>
+      <div class="row">
+        <input id="hsSsid" maxlength="32" placeholder="핫스팟 이름 (SSID)" autocomplete="off" spellcheck="false" aria-label="핫스팟 이름">
+        <input id="hsPass" type="password" maxlength="63" placeholder="비밀번호 (공개망이면 비움)" autocomplete="new-password" aria-label="핫스팟 비밀번호">
+      </div>
+      <div class="row" style="margin-top:8px">
+        <button id="hsSave">저장 후 접속</button>
+        <button id="hsClear">설정 지우기</button>
+      </div>
+      <p class="note" style="margin-top:8px">로봇이 휴대폰 핫스팟에 접속하게 합니다. 비밀번호는 USB로 로봇 보드에만 저장되고, 이 페이지와 상태 응답에는 나오지 않습니다. 로봇이 움직이는 중에는 바꿀 수 없습니다. ESP32는 2.4 GHz만 지원하므로 아이폰은 “호환성 최대화”를 켜세요. 접속되면 위 “연결 방법”에서 핫스팟 Wi-Fi를 고르세요. 로봇 자체 Wi-Fi(192.168.4.1)는 계속 켜져 있습니다.</p>
+    </div>
   </section>
 
   <p class="note">안전: 로봇을 고정하거나 발을 띄운 상태에서 먼저 시험하고, 주변을 비우고, 전원 스위치를 손 닿는 곳에 두세요. 소프트웨어 정지에만 의존하지 마세요.</p>
@@ -220,16 +252,80 @@ td small{color:var(--muted)}
     walking_active: "다른 프로그램(노트북)에서 보행 중입니다. 먼저 정지하세요.",
     servos_not_ready: "서보 초기화 실패", usb_disconnected: "USB 연결이 끊겼습니다.",
     imu_not_mapped: "기울기 센서 축 설정이 필요합니다 (robot_dog_imu_check.ipynb).",
-    imu_not_valid: "기울기 센서 값이 없거나 오래됐습니다.", tilt_limit: "로봇이 한계 이상 기울어 있어 활성화할 수 없습니다.", stop_in_progress: "정지 처리 중입니다. 잠시 후 다시 시도하세요."
+    imu_not_valid: "기울기 센서 값이 없거나 오래됐습니다.", tilt_limit: "로봇이 한계 이상 기울어 있어 활성화할 수 없습니다.", stop_in_progress: "정지 처리 중입니다. 잠시 후 다시 시도하세요.",
+    armed: "움직임이 활성화된 동안에는 핫스팟 설정을 바꿀 수 없습니다. 먼저 정지하세요.",
+    invalid_ssid: "핫스팟 이름은 1~32바이트이고 탭·제어 문자를 쓸 수 없습니다.",
+    invalid_password: "비밀번호는 비우거나(공개망) 영문·숫자·기호 8~63자여야 합니다.",
+    firmware_without_hotspot: "이 펌웨어는 핫스팟 연결을 지원하지 않습니다. 펌웨어를 업데이트하세요.",
+    bad_host: "로봇이 이 주소로 온 요청을 거부했습니다. IP 주소나 robotdog.local을 쓰세요."
   };
   var STOP_KO = { tilt_limit: "기울기 한계 초과로 자동 정지", imu_lost: "센서 값 끊김으로 자동 정지",
     heartbeat_timeout: "하트비트 끊김으로 자동 정지", level_diverge: "수평 보정이 반대로 작동해 자동 정지 (부호 확인 필요)" };
+
+  // ---- connection mode: USB gateway or phone hotspot ------------------------
+  // The page is served either by the USB gateway (http://127.0.0.1:8787) or by
+  // the robot itself. From the gateway page, hotspot mode calls the robot's IP
+  // directly (the firmware allows CORS only for the gateway origin). From a
+  // robot page, USB is not reachable (private network -> loopback is blocked).
+  var LOC = (typeof location !== "undefined" && location) || {};
+  var onGateway = LOC.protocol === "http:" && /^(127\.\d+\.\d+\.\d+|localhost)(:\d+)?$/.test(LOC.host || "");
+  var HOST_RE = /^[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$/;
+  var CONN_KEY = "robotdog.conn";
+  var conn = { mode: onGateway ? "usb" : "hot", host: "" };   // host: hotspot target (gateway page only)
+  var apiBase = "";          // "" = same origin as the page (relative URLs)
+  var connGen = 0, pollCtrl = null, addrEdited = false, lastStaIp = "";
+
+  function store(get, value) {
+    try {
+      if (get) return JSON.parse(window.localStorage.getItem(CONN_KEY) || "null");
+      window.localStorage.setItem(CONN_KEY, JSON.stringify(value));
+    } catch (e) { /* storage blocked or unavailable: keep defaults */ }
+    return null;
+  }
+  function apiUrl(path) { return apiBase + path; }
+  function targetText() {
+    if (!onGateway) return (LOC.host || "이 페이지") + " (로봇에서 열린 페이지)";
+    return conn.mode === "usb" ? "USB 게이트웨이 → " + (state && state.serialPort ? state.serialPort : "직렬 포트")
+      : "http://" + conn.host + " (로봇에 직접)";
+  }
+  // Returns an error text, or "" when the switch was made.
+  function setConn(mode, host) {
+    if (!onGateway) {   // a robot-served page never switches; it only explains how to use USB
+      if (mode === "usb") return "USB 연결은 노트북에서 python usb_gateway.py 를 실행한 뒤 http://127.0.0.1:8787 을 여세요. 로봇에서 열린 이 페이지는 USB 게이트웨이에 접속할 수 없습니다.";
+      return "";
+    }
+    // Stale > 3 s: heartbeats stopped long ago, so the firmware has already stopped.
+    if (isFresh(3000) && state.armed && state.youControl) return "움직임이 활성화된 동안에는 연결 방법을 바꿀 수 없습니다. 먼저 비활성화하거나 정지하세요.";
+    if (mode === "hot") {
+      host = String(host || "").trim().replace(/^https?:\/\//i, "").replace(/\/+$/, "").replace(/:80$/, "");
+      if (!HOST_RE.test(host)) return "로봇 주소가 올바르지 않습니다. 예: 172.20.10.3 또는 robotdog.local";
+    } else {
+      host = conn.host;
+    }
+    if (mode === conn.mode && (mode === "usb" || host === conn.host)) return "";
+    conn = { mode: mode, host: host };
+    apiBase = mode === "hot" ? "http://" + host + "/" : "";
+    connGen++;                        // replies from the old target are ignored
+    if (pollCtrl) pollCtrl.abort();
+    state = null; lastOk = 0;
+    store(false, conn);
+    return "";
+  }
+  (function () {
+    var saved = onGateway ? store(true) : null;
+    if (saved && saved.mode === "hot" && typeof saved.host === "string" && HOST_RE.test(saved.host)) {
+      conn = { mode: "hot", host: saved.host };
+      apiBase = "http://" + saved.host + "/";
+    } else if (saved && typeof saved.host === "string" && HOST_RE.test(saved.host)) {
+      conn.host = saved.host;
+    }
+  })();
 
   function setMsg(text, isErr) { $("msg").textContent = text || ""; $("msg").className = "msg" + (isErr ? " err" : ""); }
 
   function post(params, keepalive) {
     params.session = session;
-    return fetch("api/command", {
+    return fetch(apiUrl("api/command"), {
       method: "POST", keepalive: !!keepalive, cache: "no-store",
       headers: { "Content-Type": "application/x-www-form-urlencoded", "X-Robot-Control": "1" },
       body: new URLSearchParams(params).toString()
@@ -261,7 +357,7 @@ td small{color:var(--muted)}
   function render() {
     var fresh = isFresh(1500);
     $("link").className = "badge " + (fresh ? "ok" : "bad");
-    $("linkText").textContent = !state ? "연결 확인 중" :
+    $("linkText").textContent = !state ? (pollFails > 2 ? "응답 없음 (주소·연결 확인)" : "연결 확인 중") :
       (state.link === "usb" ? "USB 게이트웨이" : "ESP32 Wi-Fi") +
       (fresh ? " 연결됨" : state.connected && state.error ? " 응답 없음 (" + state.error + ")" : " 연결 끊김");
     var mine = fresh && state.armed && state.youControl;
@@ -271,9 +367,12 @@ td small{color:var(--muted)}
       b.disabled = !mine;
       b.classList.toggle("on", !!(mine && state.walk === b.dataset.dir));
     });
-    if (state && state.wifi && state.wifi.password) {
-      $("wifiCard").hidden = false;
-      $("wifiInfo").textContent = "SSID " + state.wifi.ssid + " / 비밀번호 " + state.wifi.password + " / http://192.168.4.1";
+    var wifi = state && state.wifi;
+    $("wifiCard").hidden = !(wifi && wifi.password);
+    if (wifi && wifi.password) {
+      var sta = wifi.sta;
+      $("wifiInfo").textContent = "SSID " + wifi.ssid + " / 비밀번호 " + wifi.password + " / http://192.168.4.1" +
+        (sta && sta.status === "CONNECTED" && sta.ip ? " · 핫스팟 " + sta.ssid + ": http://" + sta.ip + " 또는 http://" + sta.host : "");
     }
     if (!fresh) {
       ["sArmed", "sCtrl", "sWalk", "sSettled"].forEach(function (id) { $(id).textContent = "알 수 없음"; });
@@ -288,25 +387,74 @@ td small{color:var(--muted)}
     }
     // Monitors and drawings come last and are isolated from each other: a failure
     // in one must not leave the status text above or the other cards showing old values.
-    [renderLevel, renderCompare, renderModel].forEach(function (fn) {
+    [renderConn, renderLevel, renderCompare, renderModel].forEach(function (fn) {
       try { fn(fresh); } catch (e) { if (typeof console !== "undefined" && console.error) console.error(e); }
     });
   }
 
   // One status request at a time; a hung request is aborted after 1.5 s.
   // (Without AbortController a hung request cannot be cancelled, so no guard.)
-  var pollBusy = false;
+  // A reply that arrives after the connection mode changed is dropped.
+  var pollBusy = false, pollFails = 0;
   function poll() {
     var ctrl = window.AbortController ? new AbortController() : null;
     if (ctrl && pollBusy) return Promise.resolve();
     pollBusy = !!ctrl;
+    pollCtrl = ctrl;
+    var gen = connGen;
     var timer = ctrl ? setTimeout(function () { ctrl.abort(); }, 1500) : null;
-    return fetch("api/status?session=" + session, { cache: "no-store", signal: ctrl ? ctrl.signal : undefined })
+    return fetch(apiUrl("api/status?session=" + session), { cache: "no-store", signal: ctrl ? ctrl.signal : undefined })
       .then(function (r) { return r.json(); })
-      .then(function (s) { state = s; if (validState(s)) { lastOk = Date.now(); recordLevel(s); recordCompare(s, lastOk); } })
-      .catch(function () {})
-      .then(function () { clearTimeout(timer); pollBusy = false; render(); });
+      .then(function (s) {
+        if (gen !== connGen) return;
+        state = s; pollFails = 0;
+        if (validState(s)) { lastOk = Date.now(); recordLevel(s); recordCompare(s, lastOk); }
+      })
+      .catch(function () { if (gen === connGen) pollFails++; })
+      .then(function () { clearTimeout(timer); pollBusy = false; pollCtrl = null; render(); });
   }
+
+  // ---- connection card and hotspot settings ----------------------------------
+  var STA_KO = { CONNECTED: "연결됨", CONNECTING: "연결 중", NOT_FOUND: "핫스팟을 찾지 못함 (이름·2.4 GHz 확인)",
+    FAILED: "연결 실패 (비밀번호 확인)", OFF: "설정 없음" };
+  function renderConn(fresh) {
+    var usbFresh = fresh && state.link === "usb";
+    var sta = state && state.wifi && state.wifi.sta;
+    if (usbFresh && sta && sta.status === "CONNECTED" && sta.ip) lastStaIp = sta.ip;
+    $("cmUsb").classList.toggle("on", onGateway && conn.mode === "usb");
+    $("cmHot").classList.toggle("on", !onGateway || conn.mode === "hot");
+    $("hsAddrRow").hidden = !onGateway;
+    if (onGateway && !addrEdited) $("hsAddr").value = conn.mode === "hot" ? conn.host : lastStaIp || conn.host || "robotdog.local";
+    $("connTarget").textContent = targetText();
+    $("connNote").textContent = !onGateway
+      ? "이 페이지는 로봇이 직접 보냈습니다 (로봇 Wi-Fi 또는 핫스팟). USB로 쓰려면 노트북에서 http://127.0.0.1:8787 을 여세요."
+      : conn.mode === "usb" ? "노트북의 USB 게이트웨이를 거쳐 로봇과 통신합니다." +
+        (lastStaIp ? " 로봇이 핫스팟에 연결되어 있습니다 (" + lastStaIp + ")." : "")
+      : "브라우저가 로봇에 직접 접속합니다. 노트북과 로봇이 같은 핫스팟에 있어야 하고, 게이트웨이 주소는 http://127.0.0.1:8787 이어야 합니다.";
+    // Hotspot settings: only over a fresh USB link with firmware that reports the hotspot.
+    $("hsSet").hidden = !(usbFresh && sta);
+    if (usbFresh && sta) {
+      $("hsState").textContent = !sta.ssid ? STA_KO.OFF :
+        (STA_KO[sta.status] || sta.status) + " · " + sta.ssid + (sta.status === "CONNECTED" && sta.ip ? " · " + sta.ip + " (" + sta.host + ")" : "");
+      $("hsSave").disabled = $("hsClear").disabled = state.armed;
+    }
+  }
+  function switchConn(mode, host) {
+    var err = setConn(mode, host);
+    if (err) setMsg(err, true);
+    else { setMsg(""); addrEdited = false; poll(); }
+    render();
+  }
+  $("cmUsb").onclick = function () { switchConn("usb"); };
+  $("cmHot").onclick = function () { switchConn("hot", $("hsAddr").value); };
+  $("hsGo").onclick = function () { switchConn("hot", $("hsAddr").value); };
+  $("hsAddr").oninput = function () { addrEdited = true; };
+  $("hsSave").onclick = function () {
+    var pass = $("hsPass").value;
+    command({ cmd: "WIFI_SET", ssid: $("hsSsid").value, pass: pass }, "핫스팟 설정을 저장했습니다. 로봇이 접속을 시도합니다 (최대 15초).")
+      .then(function () { $("hsPass").value = ""; });
+  };
+  $("hsClear").onclick = function () { command({ cmd: "WIFI_CLEAR" }, "저장된 핫스팟 설정을 지웠습니다."); };
 
   // ---- level monitor: numbers + 30 s chart --------------------------------
   var LV_WINDOW_MS = 30000, LV_GAP_MS = 1200;

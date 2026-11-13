@@ -1,4 +1,4 @@
-# 인수 메모: USB / 핫스팟 두 연결 모드 (2026-11-13, 진행 중)
+# 인수 메모: USB / 핫스팟 두 연결 모드 (2026-11-13, 코드 완료·QA 중, 미업로드)
 
 다른 세션이나 다른 계정에서 이어서 작업할 때 이 파일부터 읽는다. 이전 상황은 `_workspace/2026-11-12_handoff.md`에 있다.
 
@@ -32,29 +32,28 @@
 - 컴파일: `cd esp32-robot-dog-code-master/tools/servoInitPose && arduino-cli compile --fqbn esp32:esp32:esp32 --warnings default .` → 1,071,871 B (81%), 전역 52,076 B.
 - 테스트: `python -m unittest discover tests` → 80개 통과. 바뀐 Host 검사에 맞게 `tests/test_usb_gateway.py`의 정적 검사를 갱신했다.
 
-## 남은 작업 (순서대로)
-1. **게이트웨이** `software/usb_gateway/usb_gateway.py`
-   - `_readline` / `_exchange`를 ASCII에서 UTF-8로 바꾼다(한글·’ 포함 핫스팟 이름).
-   - `WIFI` 줄 파서를 추가한다. `sta_ssid=`는 `" sta_ssid="`로 partition해서 줄 끝까지 읽는다. 결과에 `wifi.sta = {status, ip, ssid, host}`를 넣고, 옛 펌웨어면 생략한다.
-   - `_sensor_status` 주기(0.5초)나 약 2초 주기로 `WIFI`를 다시 읽어 IP 변화를 반영한다(지금은 핸드셰이크 때 한 번만 읽음).
-   - 명령 `WIFI_SET`(ssid, pass 필드)과 `WIFI_CLEAR`를 추가한다. 유효한 세션이 필요하고, 활성 상태면 거부한다. ssid는 1~32바이트 UTF-8에 탭·제어문자 금지, pass는 비어 있거나 인쇄 가능한 ASCII 8~63자. `do_POST`에서 `field("ssid")`, `field("pass")`를 넘긴다. 비밀번호는 로그나 상태에 넣지 않는다.
-   - 가짜 펌웨어(`tests/test_usb_gateway.py`의 `_handle`)에 WIFI 줄(sta 포함), `WIFI_SET`/`WIFI_CLEAR`를 추가하고 테스트를 작성한다(옛 펌웨어 WIFI 줄 호환 포함).
-2. **웹 페이지** `software/robot_control_web/index.html`
-   - 상단에 연결 카드를 둔다: `[USB 게이트웨이] [핫스팟 Wi-Fi]` 선택, 핫스팟용 주소 입력(기본값은 `state.wifi.sta.ip`, 저장값, `robotdog.local` 순), 접속 버튼, 현재 대상 표시.
-   - 모든 요청(`api/status`, `api/command`)에 `apiBase`를 앞에 붙인다. 페이지를 연 곳과 같은 경로면 `""`(기존 상대 경로 그대로라 하네스 테스트 유지), 아니면 `http://<host>/`.
-   - 페이지가 로봇에서 열렸을 때 USB 모드를 고르면, 직접 연결하지 않고 "노트북에서 http://127.0.0.1:8787 을 여세요"라고 안내한다(사설망에서 루프백으로 가는 요청은 막힘).
-   - 활성 상태이고 이 페이지가 조종 중이면 모드 전환을 거부한다. 전환하면 `state=null`, `lastOk=0`으로 초기화한다.
-   - 모드와 주소는 `localStorage`에 저장한다(try/catch로 감싼다).
-   - USB 모드이고 상태가 최신일 때만 "핫스팟 설정" 칸(SSID, 비밀번호, 저장 후 접속, 설정 지우기)과 STA 상태(연결됨 IP / 연결 중 / 못 찾음 / 실패 / 설정 없음)를 보여 준다.
-   - `wifiCard`의 AP 안내 문구에 핫스팟 정보를 덧붙인다.
-   - 다음으로 `python software/robot_control_web/embed_page.py`로 `web_page.h`를 재생성하고, `tests/page_harness.js`와 `tests/test_control_page.py`에 모드 전환, apiBase, 활성 중 전환 거부 테스트를 추가한다.
-3. **문서**: `software/usb_gateway/README.md`에 핫스팟 사용법을 쓴다(아이폰은 "호환성 최대화" 켜기 = 2.4 GHz 필수, ESP32는 5 GHz 불가).
-4. **QA**: `robot-integration-qa`로 CORS 허용 범위, Host 검사, 비밀번호 비노출, 활성 중 재시도 없음을 검토한다.
-5. **사용자 승인 후**: 펌웨어 업로드(서보 전원 OFF, COM14. 업로드 방법은 `2026-11-12_handoff.md`의 "2026-11-13 업로드" 참고) → `WIFI_SET` → 핫스팟 접속 확인 → 들어 올린 채 짧은 동작 시험.
+## 완료 2 (2026-11-13 오후, 테스트 96개 통과, 컴파일 1,081,215 B (82%), **업로드 안 함, 실물 미시험**)
+- **게이트웨이** `usb_gateway.py`: 직렬 UTF-8, `parse_wifi_line`(sta_ssid는 줄 끝까지), `wifi.sta`(옛 펌웨어면 없음), WIFI 2초 주기 재읽기(`_wifi_status`, 설정 변경 직후 즉시),
+  `WIFI_SET`/`WIFI_CLEAR` 명령(`check_sta_settings`로 펌웨어와 같은 제한 사전 검사, 유효 세션 필요, 활성 중 `armed` 거부, `STA1` 없으면 `firmware_without_hotspot`),
+  `do_POST`는 `keep_blank_values=True`(빈 `pass` = 공개망, `pass` 없음 = `invalid_password`). 시작할 때 핫스팟 IP 출력.
+- **테스트** `test_usb_gateway.py`: 가짜 펌웨어에 STA(WIFI 줄, WIFI_SET/CLEAR, 끝 TAB 보존) 추가, `HotspotTests` 7개 + HTTP 1개.
+- **웹 페이지** `index.html`: 상단 "연결 방법" 카드(USB 게이트웨이 / 핫스팟 Wi-Fi, 주소 입력, 현재 대상), `apiBase`(같은 출처면 `""`),
+  `connGen`으로 이전 대상의 늦은 응답 무시 + 진행 중 요청 abort, 활성(3초 이내 최신 상태) 중 전환 거부, `localStorage`(`robotdog.conn`) 저장,
+  로봇에서 연 페이지는 USB 선택 시 안내만. Wi-Fi 카드에 "핫스팟 설정"(USB·최신 상태·sta 있을 때만, 활성 중 버튼 비활성, 전송 후 비밀번호 칸 비움).
+  `web_page.h` 재생성.
+- **테스트** `page_harness.js`에 `gateway` 모드(location·localStorage 가짜) 추가, `ConnectionModeTests` 8개.
+- **문서** `usb_gateway/README.md`: 핫스팟 사용법 절, 표·Host 규칙·CORS·API(`wifi.sta`, `WIFI_SET/CLEAR`)·한계 갱신.
+
+## 남은 작업
+1. **QA**: `robot-integration-qa` 검토 결과 반영 (진행 중이면 결과를 보고 고친다).
+2. **사용자 승인 후**: 펌웨어 업로드(서보 전원 OFF, COM14. 업로드 방법은 `2026-11-12_handoff.md`의 "2026-11-13 업로드" 참고) → 게이트웨이 페이지에서 핫스팟 설정 저장 → 상태 `연결됨` 확인 → "핫스팟 Wi-Fi"로 전환해 상태 수신 확인 → 들어 올린 채 짧은 동작 시험.
+   실물에서 볼 것: 크롬이 127.0.0.1 페이지 → 172.20.x.x 요청을 사전 요청과 함께 통과시키는지, 안드로이드에서 `robotdog.local` 여부, AP 채널 변경 때 끊김.
 
 ## 알아 둘 점과 한계
 - 핫스팟에 접속하면 AP 채널이 핫스팟 채널로 바뀌어, AP에 붙어 있던 기기가 잠깐 끊길 수 있다. 활성 상태였다면 하트비트가 끊겨 정지한다(안전한 쪽).
 - 핫스팟 비밀번호를 아는 사람은 같은 망에서 페이지를 열 수 있다. 조종은 세션 하나만 가능하고 STOP은 누구나 보낼 수 있다(기존 AP와 같은 모델).
 - `robotdog.local`은 안드로이드 크롬에서 잘 안 될 수 있다. 그때는 IP를 쓴다.
+- 게이트웨이 페이지 + 핫스팟 모드에서 탭을 닫을 때의 keepalive STOP은 교차 출처 사전 요청 때문에 브라우저가 막을 수 있다. 하트비트 임대(1초)가 대신 멈춘다.
+- 핫스팟 SSID 끝의 공백은 게이트웨이 상태 표시에서 잘린다(`strip()`). 저장에는 영향 없음.
 - 이 저장소에는 git 원격(remote)이 없다. 다른 PC에서 이어 가려면 폴더를 복사하거나 원격 저장소를 추가해야 한다.
 - 작업 트리의 `CLAUDE.md`, `robot_dog_servo_control.ipynb` 변경은 사용자의 것이라 커밋하지 않는다.

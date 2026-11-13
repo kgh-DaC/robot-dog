@@ -1,6 +1,9 @@
 // Runs the control page script (robot_control_web/index.html) in a fake
 // browser: fake DOM, fake clock/timers and a scripted fetch. Prints a JSON
-// report for tests/test_control_page.py.  Usage: node page_harness.js <index.html>
+// report for tests/test_control_page.py.
+// Usage: node page_harness.js <index.html> [gateway]
+//   default: page served by the robot; "gateway": page served by the USB
+//   gateway (http://127.0.0.1:8787), connection mode switching.
 "use strict";
 const fs = require("fs");
 const vm = require("vm");
@@ -8,6 +11,7 @@ const vm = require("vm");
 const html = fs.readFileSync(process.argv[2], "utf8");
 const script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
 
+const MODE = process.argv[3] || "robot";
 let now = 0;
 const timers = [];
 function addTimer(fn, ms, repeat) { const t = { fn, ms, next: now + ms, repeat, dead: false }; timers.push(t); return t; }
@@ -48,6 +52,10 @@ let statusMode = "ok";       // ok | fail | hang
 const sim = { levelEnabled: true, levelActive: true, roll: null, pitch: null, walk: "FORWARD", armed: true, gamma: 90, trim: null };
 let imuMapped = true;
 const posts = [];
+const statusUrls = [];
+let held = null;             // gateway: a held USB status reply, released by the test
+const GW_WIFI = { ssid: "RobotDog-ABCD", password: "12345678",
+  sta: { status: "CONNECTED", ip: "172.20.10.3", ssid: "민수의 iPhone", host: "robotdog.local" } };
 const okStatus = () => ({
   link: "wifi", connected: true, armed: sim.armed, controller: "WIFI", youControl: true, walk: sim.walk,
   homing: false, settled: false, resetReason: "POWERON", lastStop: "boot", uptimeMs: 1, leaseTimeoutMs: 1000,
@@ -62,6 +70,14 @@ const okStatus = () => ({
   ...(sim.trim ? { standTrimDeg: sim.trim } : {}),     // older firmware: field absent
 });
 const response = (obj) => ({ json: () => Promise.resolve(obj), status: 200 });
+// Gateway page: relative URLs go to the USB gateway, absolute ones to the robot's IP.
+function statusFor(url) {
+  const s = okStatus();
+  if (MODE !== "gateway") return s;
+  const hot = url.startsWith("http://");
+  return Object.assign(s, hot ? { link: "wifi", controller: "WIFI" }
+    : { link: "usb", controller: "SERIAL", serialPort: "COM14", wifi: GW_WIFI });
+}
 
 const context = {
   document: {
@@ -86,8 +102,12 @@ const context = {
   clearTimeout: (t) => { if (t) t.dead = true; },
   fetch(url, opts) {
     if (opts && opts.method === "POST") {
-      posts.push({ t: now, body: opts.body });
+      posts.push({ t: now, body: opts.body, url });
       return Promise.resolve(response({ ok: true }));
+    }
+    statusUrls.push(url);
+    if (sim.holdUsb && !url.startsWith("http://")) {   // ignores abort: tests the stale-reply guard
+      return new Promise((resolve) => { held = () => resolve(response(statusFor(url))); });
     }
     if (statusMode === "fail") return Promise.reject(new Error("network"));
     if (statusMode === "hang") {
@@ -95,9 +115,15 @@ const context = {
         if (opts && opts.signal) opts.signal.onabort = () => reject(new Error("aborted"));
       });
     }
-    return Promise.resolve(response(okStatus()));
+    return Promise.resolve(response(statusFor(url)));
   },
 };
+if (MODE === "gateway") {
+  const ls = {};
+  context.location = { protocol: "http:", host: "127.0.0.1:8787" };
+  context.window.localStorage = { getItem: (k) => (k in ls ? ls[k] : null), setItem: (k, v) => { ls[k] = String(v); } };
+  context.__ls = ls;
+}
 context.AbortController = context.window.AbortController;  // window is the global in a browser
 vm.createContext(context);
 
@@ -123,7 +149,59 @@ const snapshot = () => ({ armed: el("sArmed").textContent, walk: el("sWalk").tex
   level: el("bLevel").lastChild.textContent, toggle: el("lvToggle").textContent,
   rollLabel: el("kRollLabel").firstChild.textContent });
 
-(async () => {
+const lastUrl = () => statusUrls[statusUrls.length - 1];
+const connView = () => ({ target: el("connTarget").textContent, note: el("connNote").textContent,
+  msg: el("msg").textContent, link: el("linkText").textContent, url: lastUrl(),
+  hsSetHidden: el("hsSet").hidden, hsState: el("hsState").textContent, addr: el("hsAddr").value,
+  addrRowHidden: el("hsAddrRow").hidden, wifiCardHidden: el("wifiCard").hidden, wifiInfo: el("wifiInfo").textContent });
+
+if (MODE === "gateway") (async () => {
+  vm.runInContext(script, context);
+  await advance(1500);
+  const g = { initial: connView() };
+  el("cmHot").onclick();                     // armed by this page: switching is refused
+  await advance(300);
+  g.refusedArmed = connView();
+  sim.armed = false;
+  await advance(600);
+  el("hsSsid").value = "민수의 iPhone"; el("hsPass").value = "hotspot123";
+  el("hsSave").onclick();
+  await advance(300);
+  const wifiSet = posts.filter((p) => p.body.includes("cmd=WIFI_SET"));
+  g.wifiSet = { bodies: wifiSet.map((p) => p.body), url: wifiSet.length ? wifiSet[0].url : null, passAfter: el("hsPass").value };
+  el("hsClear").onclick();
+  await advance(300);
+  g.wifiClear = posts.filter((p) => p.body.includes("cmd=WIFI_CLEAR")).map((p) => p.body);
+  el("hsAddr").value = "evil.example/x?y"; el("hsAddr").oninput();
+  el("hsGo").onclick();
+  await advance(300);
+  g.badAddr = connView();
+  el("hsAddr").value = "http://172.20.10.3/";
+  sim.holdUsb = true;
+  await advance(300);                        // a USB status request is now in flight
+  el("hsGo").onclick();
+  sim.holdUsb = false;
+  if (held) held();
+  await flush(); await flush(); await flush();
+  g.lateUsbReply = connView();               // the old target's reply must be ignored
+  await advance(1000);
+  g.hot = Object.assign(connView(), { stored: context.__ls["robotdog.conn"] });
+  el("arm").onclick();
+  await advance(100);
+  g.armUrl = posts[posts.length - 1].url;
+  el("cmUsb").onclick();
+  await advance(600);
+  g.back = Object.assign(connView(), { stored: context.__ls["robotdog.conn"] });
+  // Reload with hotspot mode saved: the page starts on the robot's address.
+  context.__ls["robotdog.conn"] = JSON.stringify({ mode: "hot", host: "robotdog.local" });
+  timers.forEach((t) => { t.dead = true; });   // the old page instance is gone
+  vm.runInContext(script, context);
+  await advance(600);
+  g.reloaded = connView();
+  process.stdout.write(JSON.stringify(g));
+})();
+
+if (MODE !== "gateway") (async () => {
   vm.runInContext(script, context);
   await advance(2000);
   const report = { freshHb: hbCount(), fresh: snapshot(), chartLines: draw.lineTo };
@@ -239,5 +317,12 @@ const snapshot = () => ({ armed: el("sArmed").textContent, walk: el("sWalk").tex
   report.drawFail.staleTrim = el("mdTrim").textContent;
   statusMode = "ok";
   savedCtx.forEach(([id, fn]) => { el(id).getContext = fn; });
+  await advance(600);
+
+  // ---- page served by the robot: USB cannot be reached, only explained ---------
+  report.robotPage = { initial: connView() };
+  el("cmUsb").onclick();
+  await advance(600);
+  report.robotPage.usb = connView();
   process.stdout.write(JSON.stringify(report));
 })();

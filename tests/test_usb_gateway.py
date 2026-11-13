@@ -44,19 +44,24 @@ class FakeFirmware:
         self.settled_after = 0
         self.state_override = None
         self.silent = False
+        self.sta_support = True        # False models firmware before CAPS STA1
+        self.sta_ssid = ""
+        self.sta_pass = ""
+        self.sta_status = "OFF"
+        self.sta_ip = "-"
         self.log = []
         self._out = []
 
     # serial.Serial-like interface
     def write(self, data):
-        line = data.decode("ascii").strip()
+        line = data.decode("utf-8").rstrip("\r\n")  # like the firmware: keeps a trailing TAB
         self.log.append(line)
         if not self.silent:
             self._out.extend(self._handle(line))
 
     def readline(self):
         if self._out:
-            return (self._out.pop(0) + "\r\n").encode("ascii")
+            return (self._out.pop(0) + "\r\n").encode("utf-8")
         self.clock.t += 0.25  # serial read timeout elapses
         return b""
 
@@ -85,14 +90,30 @@ class FakeFirmware:
         self.lease_deadline = self.clock() + self.LEASE_S
         return None
 
+    def _wifi_settings(self, line):
+        if not self.sta_support:
+            return ["ERR unknown_command"]
+        if self.armed:
+            return ["ERR armed"]
+        if line == "WIFI_CLEAR":
+            self.sta_ssid, self.sta_pass, self.sta_status, self.sta_ip = "", "", "OFF", "-"
+            return ["OK WIFI_CLEAR"]
+        ssid, tab, password = line[len("WIFI_SET "):].partition("\t")
+        if not tab:
+            return ["ERR format_USE_WIFI_SET_ssid_TAB_password"]
+        self.sta_ssid, self.sta_pass, self.sta_status = ssid, password, "CONNECTING"
+        return ["OK WIFI_SET"]
+
     def _handle(self, line):
         self.tick()
+        if line.startswith("WIFI_SET ") or line == "WIFI_CLEAR":  # before split: SSID may hold spaces
+            return self._wifi_settings(line)
         parts = line.split()
         cmd = parts[0]
         if cmd == "HELLO":
             return ["READY SERVO_POSE_V1"]
         if cmd == "CAPS":
-            return ["CAPS SERVO_POSE_V1 WALK4 LEASE1 WIFI1 IMU1 LEVEL1"]
+            return ["CAPS SERVO_POSE_V1 WALK4 LEASE1 WIFI1 IMU1 LEVEL1" + (" STA1" if self.sta_support else "")]
         if cmd == "IMU":
             return ["IMU ready=1 chip=MPU_COMPATIBLE who=0x75 addr=0x69 valid=1 age=12 ax=0.04 ay=-0.01 "
                     "az=0.99 x=2.50 y=-1.25 zeroed=1 rollmap=+X pitchmap=-Y roll=2.50 pitch=1.25"]
@@ -108,7 +129,10 @@ class FakeFirmware:
             self.level = parts[1] == "ON"
             return [f"OK LEVEL {parts[1]}"]
         if cmd == "WIFI":
-            return ["WIFI ssid=RobotDog-ABCD pass=secretpass1 ip=192.168.4.1 clients=0"]
+            line = "WIFI ssid=RobotDog-ABCD pass=secretpass1 ip=192.168.4.1 clients=0"
+            if self.sta_support:
+                line += f" sta={self.sta_status} sta_ip={self.sta_ip} sta_ssid={self.sta_ssid}"
+            return [line]
         if cmd == "STATE":
             if self.state_override:
                 return [self.state_override]
@@ -162,7 +186,8 @@ def make_link(firmware=None):
 class RobotLinkTests(unittest.TestCase):
     def test_connect_reads_wifi_info_and_does_not_arm(self):
         link, fw = make_link()
-        self.assertEqual(link.wifi, {"ssid": "RobotDog-ABCD", "password": "secretpass1"})
+        self.assertEqual(link.wifi, {"ssid": "RobotDog-ABCD", "password": "secretpass1",
+                                     "sta": {"status": "OFF", "ip": "", "ssid": "", "host": "robotdog.local"}})
         self.assertFalse(fw.armed)
         self.assertNotIn("ARM", fw.log)
 
@@ -419,6 +444,94 @@ class RobotLinkTests(unittest.TestCase):
         self.assertEqual(ctx.exception.code, "invalid_session")
 
 
+class HotspotTests(unittest.TestCase):
+    def test_wifi_line_parsing_keeps_spaces_and_equals_in_hotspot_name(self):
+        from usb_gateway import parse_wifi_line
+        wifi = parse_wifi_line("WIFI ssid=RobotDog-ABCD pass=12345678 ip=192.168.4.1 clients=1 "
+                               "sta=CONNECTED sta_ip=172.20.10.3 sta_ssid=민수의 iPhone a=b")
+        self.assertEqual(wifi, {"ssid": "RobotDog-ABCD", "password": "12345678",
+                                "sta": {"status": "CONNECTED", "ip": "172.20.10.3",
+                                        "ssid": "민수의 iPhone a=b", "host": "robotdog.local"}})
+        empty = parse_wifi_line("WIFI ssid=RobotDog-ABCD pass=12345678 ip=192.168.4.1 clients=0 "
+                                "sta=OFF sta_ip=- sta_ssid=")
+        self.assertEqual(empty["sta"], {"status": "OFF", "ip": "", "ssid": "", "host": "robotdog.local"})
+        self.assertIsNone(parse_wifi_line("WIFI disabled"))
+
+    def test_older_firmware_wifi_line_has_no_sta(self):
+        fw = FakeFirmware()
+        fw.sta_support = False
+        link, _ = make_link(fw)
+        status = link.status(OWNER)
+        self.assertEqual(status["wifi"], {"ssid": "RobotDog-ABCD", "password": "secretpass1"})
+        with self.assertRaises(LinkError) as ctx:
+            link.command("WIFI_SET", OWNER, ssid="Phone", password="hotspot123")
+        self.assertEqual(ctx.exception.code, "firmware_without_hotspot")
+        self.assertFalse(any(line.startswith("WIFI_SET") for line in fw.log))
+
+    def test_set_hotspot_sends_tab_separated_utf8_line_and_hides_password(self):
+        link, fw = make_link()
+        self.assertEqual(link.command("WIFI_SET", OWNER, ssid="민수의 iPhone", password="hotspot123"),
+                         {"ok": True})
+        self.assertIn("WIFI_SET 민수의 iPhone\thotspot123", fw.log)
+        self.assertEqual((fw.sta_ssid, fw.sta_pass), ("민수의 iPhone", "hotspot123"))
+        status = link.status(OWNER)        # re-read at once after a change
+        self.assertEqual(status["wifi"]["sta"]["status"], "CONNECTING")
+        self.assertEqual(status["wifi"]["sta"]["ssid"], "민수의 iPhone")
+        self.assertNotIn("hotspot123", json.dumps(status, ensure_ascii=False))
+
+    def test_open_hotspot_keeps_the_trailing_tab(self):
+        link, fw = make_link()
+        link.command("WIFI_SET", OWNER, ssid="Cafe Free", password="")
+        self.assertEqual((fw.sta_ssid, fw.sta_pass), ("Cafe Free", ""))
+
+    def test_new_hotspot_ip_shows_up_without_reconnecting(self):
+        link, fw = make_link()
+        link.command("WIFI_SET", OWNER, ssid="Phone", password="hotspot123")
+        self.assertEqual(link.status(OWNER)["wifi"]["sta"]["ip"], "")
+        fw.sta_status, fw.sta_ip = "CONNECTED", "172.20.10.3"
+        fw.clock.t += 0.1
+        self.assertEqual(link.status(OWNER)["wifi"]["sta"]["ip"], "")  # cached for 2 s
+        fw.clock.t += 2.0
+        sta = link.status(OWNER)["wifi"]["sta"]
+        self.assertEqual((sta["status"], sta["ip"]), ("CONNECTED", "172.20.10.3"))
+
+    def test_hotspot_settings_rejected_while_armed_or_invalid(self):
+        link, fw = make_link()
+        link.command("ARM", OWNER)
+        for cmd in ("WIFI_SET", "WIFI_CLEAR"):
+            with self.subTest(cmd=cmd):
+                with self.assertRaises(LinkError) as ctx:
+                    link.command(cmd, OWNER, ssid="Phone", password="hotspot123")
+                self.assertEqual(ctx.exception.code, "armed")
+        fw.armed, fw.lease_deadline = True, fw.clock() + 5   # armed from Wi-Fi: other session too
+        fw.ctrl = "WIFI"
+        with self.assertRaises(LinkError) as ctx:
+            link.command("WIFI_CLEAR", OTHER)
+        self.assertEqual(ctx.exception.code, "armed")
+        link.command("STOP", None)
+        bad = [("", "hotspot123", "invalid_ssid"), ("a" * 33, "hotspot123", "invalid_ssid"),
+               ("가" * 11, "hotspot123", "invalid_ssid"),            # 33 UTF-8 bytes
+               ("Pho\tne", "hotspot123", "invalid_ssid"), ("Phone\n", "hotspot123", "invalid_ssid"),
+               ("Phone", "short", "invalid_password"), ("Phone", "x" * 64, "invalid_password"),
+               ("Phone", "비밀번호12345", "invalid_password"), ("Phone", None, "invalid_password")]
+        for ssid, password, code in bad:
+            with self.subTest(ssid=ssid, password=password):
+                with self.assertRaises(LinkError) as ctx:
+                    link.command("WIFI_SET", OWNER, ssid=ssid, password=password)
+                self.assertEqual(ctx.exception.code, code)
+        self.assertFalse(any(line.startswith("WIFI_SET") for line in fw.log))
+        with self.assertRaises(LinkError) as ctx:
+            link.command("WIFI_CLEAR", "bad session!")
+        self.assertEqual(ctx.exception.code, "invalid_session")
+
+    def test_clear_forgets_hotspot(self):
+        link, fw = make_link()
+        link.command("WIFI_SET", OWNER, ssid="Phone", password="hotspot123")
+        self.assertEqual(link.command("WIFI_CLEAR", OWNER), {"ok": True})
+        self.assertEqual(link.status(OWNER)["wifi"]["sta"], {"status": "OFF", "ip": "", "ssid": "",
+                                                             "host": "robotdog.local"})
+
+
 class HttpTests(unittest.TestCase):
     def setUp(self):
         self.link, self.fw = make_link()
@@ -474,6 +587,23 @@ class HttpTests(unittest.TestCase):
         self.assertEqual((status, json.loads(body)["error"]), (409, "not_armed"))
         self.assertEqual(self.post({"cmd": "STOP"})[0], 200)
         self.assertFalse(self.fw.armed)
+
+    def test_hotspot_settings_over_http(self):
+        status, body = self.post({"cmd": "WIFI_SET", "session": OWNER, "ssid": "민수의 iPhone",
+                                  "pass": "hotspot123"})
+        self.assertEqual((status, json.loads(body)), (200, {"ok": True}))
+        self.assertEqual((self.fw.sta_ssid, self.fw.sta_pass), ("민수의 iPhone", "hotspot123"))
+        status, body = self.post({"cmd": "WIFI_SET", "session": OWNER, "ssid": "Open", "pass": ""})
+        self.assertEqual(status, 200)                     # blank pass = open network
+        self.assertEqual(self.fw.sta_pass, "")
+        status, body = self.post({"cmd": "WIFI_SET", "session": OWNER, "ssid": "Phone"})
+        self.assertEqual((status, json.loads(body)["error"]), (400, "invalid_password"))
+        status, body = self.request("GET", f"/api/status?session={OWNER}")
+        self.assertNotIn(b"hotspot123", body)
+        self.assertEqual(json.loads(body)["wifi"]["sta"]["ssid"], "Open")
+        status, _ = self.post({"cmd": "WIFI_CLEAR", "session": OWNER}, headers={"X-Robot-Control": "0"})
+        self.assertEqual(status, 403)
+        self.assertEqual(self.fw.sta_ssid, "Open")
 
 
 class MainTests(unittest.TestCase):

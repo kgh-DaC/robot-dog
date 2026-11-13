@@ -35,6 +35,8 @@ MAX_BODY_BYTES = 1024
 RECONNECT_INTERVAL_S = 3.0
 POLL_HANDSHAKE_S = 4.0  # shorter than at startup: a page request is waiting
 SENSOR_REFRESH_S = 0.5  # IMU/LEVEL lines are re-read at most this often (serial load)
+WIFI_REFRESH_S = 2.0    # WIFI line (hotspot state and IP) re-read at most this often
+MDNS_HOST = "robotdog.local"
 
 
 def open_serial_without_reset(port: str, baud: int):
@@ -114,6 +116,37 @@ def parse_stand_trim(line: str) -> dict | None:
     return dict(zip(("LF", "RF", "LH", "RH"), values))
 
 
+def parse_wifi_line(line: str) -> dict | None:
+    """``WIFI ssid=.. pass=.. ip=.. clients=N [sta=.. sta_ip=.. sta_ssid=<rest>]``.
+
+    Returns the AP name/password and, for firmware with hotspot support
+    (CAPS STA1), ``sta = {status, ip, ssid, host}``. The hotspot SSID may hold
+    spaces or '=', so it is everything after " sta_ssid=". The hotspot password
+    is never sent by the firmware and never appears here."""
+    head, has_sta_ssid, sta_ssid = line.partition(" sta_ssid=")
+    fields = _fields(head)
+    if "ssid" not in fields:
+        return None
+    wifi = {"ssid": fields["ssid"], "password": fields.get("pass", "")}
+    if "sta" in fields and has_sta_ssid:
+        ip = fields.get("sta_ip", "-")
+        wifi["sta"] = {"status": fields["sta"], "ip": "" if ip == "-" else ip,
+                       "ssid": sta_ssid, "host": MDNS_HOST}
+    return wifi
+
+
+def check_sta_settings(ssid: str | None, password: str | None) -> None:
+    """Same limits as wifiStaSet() in the firmware, checked before the serial write.
+
+    ssid: 1..32 UTF-8 bytes, no control characters (the TAB is the separator).
+    password: empty (open network) or 8..63 printable ASCII characters."""
+    if not ssid or len(ssid.encode("utf-8")) > 32 or any(ord(c) < 0x20 or ord(c) == 0x7F for c in ssid):
+        raise LinkError("invalid_ssid")
+    if password is None or (password and not 8 <= len(password) <= 63) \
+            or any(not 0x20 <= ord(c) <= 0x7E for c in password):
+        raise LinkError("invalid_password")
+
+
 class LinkError(RuntimeError):
     def __init__(self, code: str):
         super().__init__(code)
@@ -144,6 +177,7 @@ class RobotLink:
         self.caps: set[str] = set()
         self._sensor_cache: tuple[float, dict | None, dict | None] | None = None
         self._stand_trim: dict | None = None  # from the last LEVEL line; None = firmware does not report it
+        self._wifi_read_at: float | None = None  # last WIFI line read (None = re-read on next status)
         self._serial = None
         self._last_attempt = None
         self.owner_session: str | None = None
@@ -158,7 +192,7 @@ class RobotLink:
 
     @staticmethod
     def _readline(handle) -> str:
-        return handle.readline().decode("ascii", errors="replace").strip()
+        return handle.readline().decode("utf-8", errors="replace").strip()
 
     def _exchange(self, handle, command: str, expect: str, exact: bool, timeout_s: float) -> str:
         """Send one command and wait for its reply line.
@@ -168,7 +202,7 @@ class RobotLink:
         """
         with self._write_lock:
             handle.reset_input_buffer()
-            handle.write((command + "\r\n").encode("ascii"))
+            handle.write((command + "\r\n").encode("utf-8"))
         deadline = self._clock() + timeout_s
         while self._clock() < deadline:
             line = self._readline(handle)
@@ -218,11 +252,7 @@ class RobotLink:
         self.caps = set(caps)
         if "WIFI1" not in caps:
             return None
-        info = self._exchange(handle, "WIFI", "WIFI ", False, 2.0)
-        fields = dict(item.split("=", 1) for item in info.split()[1:] if "=" in item)
-        if "ssid" not in fields:
-            return None
-        return {"ssid": fields["ssid"], "password": fields.get("pass", "")}
+        return parse_wifi_line(self._exchange(handle, "WIFI", "WIFI ", False, 2.0))
 
     def connect(self, handshake_s: float = 12.0) -> None:
         """Open and handshake without holding ``_lock`` (STOP and status stay responsive)."""
@@ -249,6 +279,7 @@ class RobotLink:
             with self._lock:
                 self._serial = handle
                 self.wifi = wifi
+                self._wifi_read_at = self._clock()
                 self.owner_session = None
                 self.last_error = ""
         finally:
@@ -274,6 +305,16 @@ class RobotLink:
         self._stand_trim = parse_stand_trim(level_line) if level_line else None
         self._sensor_cache = (now, imu, level)
         return imu, level
+
+    def _wifi_status(self) -> dict | None:
+        """AP and hotspot info, re-read at most every WIFI_REFRESH_S so a new
+        hotspot IP shows up without reconnecting. Caller holds _lock."""
+        if "STA1" in self.caps:
+            now = self._clock()
+            if self._wifi_read_at is None or now - self._wifi_read_at >= WIFI_REFRESH_S:
+                self.wifi = parse_wifi_line(self._transact("WIFI", "WIFI "))
+                self._wifi_read_at = now
+        return self.wifi
 
     def _write_stop_now(self) -> None:
         """Write STOP without waiting for an in-flight transaction to finish."""
@@ -302,6 +343,7 @@ class RobotLink:
                     leg, _, values = item.partition("=")
                     angles[leg] = [int(v) for v in values.split("/")]
                 imu, level = self._sensor_status()
+                wifi = self._wifi_status()
                 stand_trim = self._stand_trim
                 uptime = int(state.get("uptime", "0") or 0)
                 armed = state.get("armed") == "1"
@@ -331,7 +373,7 @@ class RobotLink:
             "uptimeMs": uptime,
             "leaseTimeoutMs": 1000,
             "angles": angles,
-            "wifi": self.wifi,
+            "wifi": wifi,
             "imu": imu,
             "level": level,
         }
@@ -340,7 +382,8 @@ class RobotLink:
         return reply
 
     def command(self, cmd: str, session: str | None, direction: str | None = None,
-                level_on: str | None = None) -> dict:
+                level_on: str | None = None, ssid: str | None = None,
+                password: str | None = None) -> dict:
         if cmd == "STOP":
             # Written at once (no waiting behind a poll), then repeated under the
             # lock to get a confirmed reply. STOP is idempotent on the firmware.
@@ -383,6 +426,8 @@ class RobotLink:
                 self._transact(f"LEVEL {mode}", f"OK LEVEL {mode}", exact=True)
                 self._sensor_cache = None
                 return {"ok": True}
+            if cmd in ("WIFI_SET", "WIFI_CLEAR"):
+                return self._wifi_settings(cmd, ssid, password)
             if session != self.owner_session:
                 raise LinkError("not_armed")
             if cmd == "HB":
@@ -397,6 +442,23 @@ class RobotLink:
             else:
                 raise LinkError("unknown_command")
             return {"ok": True}
+
+    def _wifi_settings(self, cmd: str, ssid: str | None, password: str | None) -> dict:
+        """Save or forget the phone hotspot. Caller holds _lock. Refused while
+        armed (the firmware refuses too): joining a network rescans channels.
+        The password goes only to the serial port, never to logs or replies."""
+        if "STA1" not in self.caps:
+            raise LinkError("firmware_without_hotspot")
+        if cmd == "WIFI_SET":
+            check_sta_settings(ssid, password)
+        if "armed=1" in self._transact("STATE", "STATE ").split():
+            raise LinkError("armed")
+        if cmd == "WIFI_SET":
+            self._transact(f"WIFI_SET {ssid}\t{password}", "OK WIFI_SET", exact=True, timeout_s=4.0)
+        else:
+            self._transact("WIFI_CLEAR", "OK WIFI_CLEAR", exact=True, timeout_s=4.0)
+        self._wifi_read_at = None  # show the new hotspot state on the next status
+        return {"ok": True}
 
     def shutdown(self, settle_timeout_s: float = 6.0) -> bool:
         """STOP, wait for a settled+saved pose, then close. Returns settle success."""
@@ -419,7 +481,8 @@ class RobotLink:
 
 
 ERROR_STATUS = {"usb_disconnected": 503, "usb_connecting": 503, "no_response": 504, "invalid_session": 400,
-                "invalid_direction": 400, "invalid_level": 400, "unknown_command": 400}
+                "invalid_direction": 400, "invalid_level": 400, "unknown_command": 400,
+                "invalid_ssid": 400, "invalid_password": 400}
 
 
 def make_handler(link: RobotLink, allowed_hosts: set[str], page_path: Path = PAGE_PATH):
@@ -476,10 +539,12 @@ def make_handler(link: RobotLink, allowed_hosts: set[str], page_path: Path = PAG
             if length < 0 or length > MAX_BODY_BYTES:
                 self._json(413, {"ok": False, "error": "bad_body_size"})
                 return
-            form = parse_qs(self.rfile.read(length).decode("utf-8", errors="replace"))
+            # keep_blank_values: an empty "pass" means an open hotspot, a missing one is an error.
+            form = parse_qs(self.rfile.read(length).decode("utf-8", errors="replace"), keep_blank_values=True)
             field = lambda name: form.get(name, [None])[0]  # noqa: E731
             try:
-                result = link.command(field("cmd") or "", field("session"), field("dir"), field("on"))
+                result = link.command(field("cmd") or "", field("session"), field("dir"), field("on"),
+                                      field("ssid"), field("pass"))
             except LinkError as exc:
                 self._json(ERROR_STATUS.get(exc.code, 409), {"ok": False, "error": exc.code})
                 return
@@ -511,6 +576,10 @@ def main(argv=None) -> int:
         print(f"Connected to ESP32 on {args.port}.")
         if link.wifi:
             print(f"ESP32 Wi-Fi: SSID {link.wifi['ssid']} / password {link.wifi['password']} / http://192.168.4.1")
+            sta = link.wifi.get("sta")
+            if sta and sta["ssid"]:
+                where = f"http://{sta['ip']} or http://{MDNS_HOST}" if sta["ip"] else sta["status"]
+                print(f"Phone hotspot {sta['ssid']}: {where}")
     except LinkError:
         print(f"ESP32 not ready on {args.port} ({link.last_error}); will retry when the page polls.")
 

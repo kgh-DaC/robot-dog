@@ -294,6 +294,78 @@ class LevelCompareTests(unittest.TestCase):
         self.assertIn("<td>%.1f초</td>" % rows[-1]["sec"], view["body"])
 
 
+@unittest.skipUnless(NODE, "node is not installed")
+class ConnectionModeTests(unittest.TestCase):
+    """USB gateway / phone hotspot switching (page served by the gateway or by the robot)."""
+
+    @classmethod
+    def setUpClass(cls):
+        out = subprocess.run([NODE, str(HARNESS), str(PAGE), "gateway"], capture_output=True, text=True,
+                             encoding="utf-8", timeout=60, check=True)
+        cls.g = json.loads(out.stdout)
+        out = subprocess.run([NODE, str(HARNESS), str(PAGE)], capture_output=True, text=True,
+                             encoding="utf-8", timeout=60, check=True)
+        cls.robot = json.loads(out.stdout)["robotPage"]
+
+    def test_gateway_page_starts_on_usb_with_relative_urls(self):
+        v = self.g["initial"]
+        self.assertTrue(v["url"].startswith("api/status?"))
+        self.assertEqual(v["target"], "USB 게이트웨이 → COM14")
+        self.assertEqual(v["addr"], "172.20.10.3")             # suggested from the robot's hotspot IP
+        self.assertIn("172.20.10.3", v["wifiInfo"])
+
+    def test_hotspot_settings_shown_over_usb_and_password_not_kept(self):
+        v = self.g["initial"]
+        self.assertFalse(v["hsSetHidden"])
+        self.assertEqual(v["hsState"], "연결됨 · 민수의 iPhone · 172.20.10.3 (robotdog.local)")
+        ws = self.g["wifiSet"]
+        self.assertEqual(len(ws["bodies"]), 1)
+        self.assertIn("cmd=WIFI_SET&ssid=%EB%AF%BC%EC%88%98%EC%9D%98+iPhone&pass=hotspot123", ws["bodies"][0])
+        self.assertEqual(ws["url"], "api/command")              # only through the USB gateway
+        self.assertEqual(ws["passAfter"], "")                   # field cleared after sending
+        self.assertEqual(len(self.g["wifiClear"]), 1)
+        self.assertNotIn("hotspot123", json.dumps(self.g["hot"]))
+
+    def test_switch_refused_while_this_page_controls(self):
+        v = self.g["refusedArmed"]
+        self.assertIn("바꿀 수 없습니다", v["msg"])
+        self.assertTrue(v["url"].startswith("api/status?"))
+        self.assertTrue(v["target"].startswith("USB"))
+
+    def test_invalid_address_is_rejected(self):
+        v = self.g["badAddr"]
+        self.assertIn("올바르지 않습니다", v["msg"])
+        self.assertTrue(v["url"].startswith("api/status?"))
+
+    def test_late_reply_from_old_target_is_ignored(self):
+        v = self.g["lateUsbReply"]
+        self.assertEqual(v["link"], "연결 확인 중")             # not "USB 게이트웨이 연결됨"
+        self.assertTrue(v["hsSetHidden"])
+
+    def test_hotspot_mode_calls_the_robot_directly_and_is_saved(self):
+        v = self.g["hot"]
+        self.assertTrue(v["url"].startswith("http://172.20.10.3/api/status?"))   # "http://" and "/" stripped from input
+        self.assertEqual(v["link"], "ESP32 Wi-Fi 연결됨")
+        self.assertTrue(v["hsSetHidden"])
+        self.assertEqual(json.loads(v["stored"]), {"mode": "hot", "host": "172.20.10.3"})
+        self.assertEqual(self.g["armUrl"], "http://172.20.10.3/api/command")
+
+    def test_switch_back_to_usb_and_reload_restores_mode(self):
+        v = self.g["back"]
+        self.assertTrue(v["url"].startswith("api/status?"))
+        self.assertEqual(json.loads(v["stored"])["mode"], "usb")
+        r = self.g["reloaded"]
+        self.assertTrue(r["url"].startswith("http://robotdog.local/api/status?"))
+        self.assertEqual(r["addr"], "robotdog.local")
+
+    def test_robot_served_page_only_explains_usb(self):
+        self.assertTrue(self.robot["initial"]["addrRowHidden"])
+        v = self.robot["usb"]
+        self.assertIn("http://127.0.0.1:8787", v["msg"])
+        self.assertTrue(v["url"].startswith("api/status?"))
+        self.assertEqual(v["link"], "ESP32 Wi-Fi 연결됨")
+
+
 class EmbeddedPageTests(unittest.TestCase):
     def test_firmware_header_matches_page(self):
         import sys
