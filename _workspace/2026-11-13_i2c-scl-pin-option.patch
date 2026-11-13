@@ -1,0 +1,175 @@
+diff --git a/esp32-robot-dog-code-master/tools/servoInitPose/imu_sensor.ino b/esp32-robot-dog-code-master/tools/servoInitPose/imu_sensor.ino
+index bf8a502..a0419d8 100644
+--- a/esp32-robot-dog-code-master/tools/servoInitPose/imu_sensor.ino
++++ b/esp32-robot-dog-code-master/tools/servoInitPose/imu_sensor.ino
+@@ -24,7 +24,12 @@
+ #include <Wire.h>
+ 
+ const uint8_t IMU_SDA_PIN = 21;
+-const uint8_t IMU_SCL_PIN = 22;
++const uint8_t IMU_SCL_DEFAULT_PIN = 22;
++// 2026-11-13: GPIO22 read 0 even with its wire removed (I2CDIAG scl=0/0/0), so
++// the clock pin can be moved with "I2CSCL <pin>" (serial only). The choice is
++// stored in Preferences "imuCal"/"scl" and used from the next boot on as well.
++const uint8_t IMU_SCL_CHOICES[] = {22, 19, 23, 32, 33};
++uint8_t imuSclPin = IMU_SCL_DEFAULT_PIN;
+ const uint8_t IMU_ADDRESSES[] = {0x69, 0x68};
+ const uint16_t IMU_SAMPLE_INTERVAL_MS = 20;      // 50 Hz
+ const uint16_t IMU_STALE_MS = 200;               // older sample = not valid
+@@ -178,6 +183,17 @@ bool imuPlausible()
+   return false;
+ }
+ 
++// A clock pin from the list that no servo uses right now.
++bool imuSclPinAllowed(uint8_t pin)
++{
++  bool listed = false;
++  for (uint8_t i = 0; i < sizeof(IMU_SCL_CHOICES); i++) listed = listed || IMU_SCL_CHOICES[i] == pin;
++  for (int i = 0; i < SERVO_COUNT; i++) {
++    if (servos[i].pin == pin) return false;
++  }
++  return listed;
++}
++
+ void loadImuCalibration()
+ {
+   Preferences store;
+@@ -189,7 +205,9 @@ void loadImuCalibration()
+   imuRollSign = store.getChar("rs", 1);
+   imuPitchAxis = store.getChar("pa", -1);
+   imuPitchSign = store.getChar("ps", 1);
++  const uint8_t savedScl = store.getUChar("scl", IMU_SCL_DEFAULT_PIN);
+   store.end();
++  if (imuSclPinAllowed(savedScl)) imuSclPin = savedScl;
+   const bool mapOk = imuRollAxis >= 0 && imuRollAxis <= 1 && imuPitchAxis >= 0 && imuPitchAxis <= 1 &&
+                      imuRollAxis != imuPitchAxis && abs(imuRollSign) == 1 && abs(imuPitchSign) == 1;
+   if (!mapOk) imuRollAxis = imuPitchAxis = -1;
+@@ -235,10 +253,11 @@ void imuProbeAndInit()
+ 
+ void imuSetup()
+ {
+-  Wire.begin(IMU_SDA_PIN, IMU_SCL_PIN, 400000);
++  loadImuCalibration();  // also the saved clock pin
++  Wire.begin(IMU_SDA_PIN, imuSclPin, 400000);
+   Wire.setTimeOut(10);  // ms; a stuck bus must not stall the safety loop
++  Serial.printf("I2C_PINS sda=%d scl=%d\n", IMU_SDA_PIN, imuSclPin);
+   printI2cScan();
+-  loadImuCalibration();
+   imuProbeAndInit();
+ }
+ 
+@@ -253,7 +272,7 @@ void imuSetup()
+ //     power (its pull-up resistor then pulls the line down)
+ void i2cDiagScan(uint32_t hz)
+ {
+-  Wire.begin(IMU_SDA_PIN, IMU_SCL_PIN, hz);
++  Wire.begin(IMU_SDA_PIN, imuSclPin, hz);
+   Wire.setTimeOut(10);
+   uint8_t found = 0;
+   for (uint8_t addr = 1; addr < 127; addr++) {
+@@ -270,7 +289,7 @@ void printI2cDiag()
+ {
+   Wire.end();
+   int level[2][3];
+-  const uint8_t pins[2] = {IMU_SDA_PIN, IMU_SCL_PIN};
++  const uint8_t pins[2] = {IMU_SDA_PIN, imuSclPin};
+   const uint8_t modes[3] = {INPUT, INPUT_PULLUP, INPUT_PULLDOWN};
+   for (int line = 0; line < 2; line++) {
+     for (int mode = 0; mode < 3; mode++) {
+@@ -280,14 +299,48 @@ void printI2cDiag()
+     }
+     pinMode(pins[line], INPUT);
+   }
+-  Serial.printf("I2CDIAG sda=%d/%d/%d scl=%d/%d/%d (none/pullup/pulldown) scan100k=",
+-                level[0][0], level[0][1], level[0][2], level[1][0], level[1][1], level[1][2]);
++  Serial.printf("I2CDIAG sdapin=%d sclpin=%d sda=%d/%d/%d scl=%d/%d/%d (none/pullup/pulldown)",
++                IMU_SDA_PIN, imuSclPin, level[0][0], level[0][1], level[0][2], level[1][0], level[1][1], level[1][2]);
++  // The other possible clock pins, read the same way: a healthy unconnected pin
++  // follows the internal pull (x/1/0).
++  for (uint8_t i = 0; i < sizeof(IMU_SCL_CHOICES); i++) {
++    const uint8_t pin = IMU_SCL_CHOICES[i];
++    if (pin == imuSclPin || !imuSclPinAllowed(pin)) continue;
++    int value[3];
++    for (int mode = 0; mode < 3; mode++) {
++      pinMode(pin, modes[mode]);
++      delay(5);
++      value[mode] = digitalRead(pin);
++    }
++    pinMode(pin, INPUT);
++    Serial.printf(" gpio%d=%d/%d/%d", pin, value[0], value[1], value[2]);
++  }
++  Serial.print(" scan100k=");
+   i2cDiagScan(100000);
+   Serial.print(" scan400k=");
+   i2cDiagScan(400000);
+   Serial.println();
+-  Wire.begin(IMU_SDA_PIN, IMU_SCL_PIN, 400000);  // back to the normal setup
++  Wire.begin(IMU_SDA_PIN, imuSclPin, 400000);  // back to the normal setup
++  Wire.setTimeOut(10);
++}
++
++// "I2CSCL <pin>": move the I2C clock to another pin, save it and look for the
++// sensor again. Blocks ~200 ms; processCommand() only runs it while nothing can move.
++const char *imuSetSclPin(uint8_t pin)
++{
++  if (!imuSclPinAllowed(pin)) return "pin_not_allowed_USE_22_19_23_32_33";
++  Preferences store;
++  if (!store.begin("imuCal", false)) return "flash_error";
++  const bool ok = store.putUChar("scl", pin) == 1;
++  store.end();
++  if (!ok) return "flash_error";
++  Wire.end();
++  pinMode(imuSclPin, INPUT);
++  imuSclPin = pin;
++  Wire.begin(IMU_SDA_PIN, imuSclPin, 400000);
+   Wire.setTimeOut(10);
++  imuProbeAndInit();
++  return NULL;
+ }
+ 
+ // --- Recovery -----------------------------------------------------------------
+diff --git a/esp32-robot-dog-code-master/tools/servoInitPose/servoInitPose.ino b/esp32-robot-dog-code-master/tools/servoInitPose/servoInitPose.ino
+index 61171f8..26f9b4f 100644
+--- a/esp32-robot-dog-code-master/tools/servoInitPose/servoInitPose.ino
++++ b/esp32-robot-dog-code-master/tools/servoInitPose/servoInitPose.ino
+@@ -179,6 +179,8 @@ bool writeServoPulse(uint8_t servoIndex, uint16_t pulseWidth)
+ #endif
+ }
+ 
++extern uint8_t imuSclPin;  // imu_sensor.ino: I2C clock pin in use
++
+ bool setLfGammaTestPin(uint8_t newPin)
+ {
+   const uint8_t servoIndex = 2;
+@@ -187,6 +189,7 @@ bool setLfGammaTestPin(uint8_t newPin)
+     if (i != servoIndex && servos[i].pin == newPin) return false;
+   }
+   if (servos[servoIndex].pin == newPin) return true;
++  if (newPin == imuSclPin) return false;  // in use as the I2C clock
+ 
+ #if ESP_ARDUINO_VERSION_MAJOR >= 3
+   const uint8_t oldPin = servos[servoIndex].pin;
+@@ -625,6 +628,23 @@ void processCommand(char *line)
+     return;
+   }
+ 
++  if (strcmp(command, "I2CSCL") == 0) {  // I2CSCL <gpio>: move and save the I2C clock pin
++    char *pinText = strtok_r(NULL, " \t", &save);
++    int pin = -1;
++    const char *error = NULL;
++    if (pinText == NULL || strtok_r(NULL, " \t", &save) != NULL || !parseAngle(pinText, pin)) error = "format_USE_I2CSCL_gpio";
++    else if (!imuSafeToBlock()) error = "walking_active";
++    else error = imuSetSclPin((uint8_t)pin);
++    if (error != NULL) {
++      Serial.print("ERR ");
++      Serial.println(error);
++      return;
++    }
++    Serial.print("OK I2CSCL ");
++    Serial.println(pin);
++    return;
++  }
++
+   if (strcmp(command, "I2CREAD") == 0) {  // diagnostics, read only: I2CREAD 69 75 [n]
+     char *addrText = strtok_r(NULL, " \t", &save);
+     char *regText = strtok_r(NULL, " \t", &save);
