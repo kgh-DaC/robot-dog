@@ -1,4 +1,4 @@
-# 로봇개 프로젝트 인수 문서 (2026-11-13 기준)
+# 로봇개 프로젝트 인수 문서 (2026-11-14 기준)
 
 다른 계정이나 새 세션에서 이어 갈 때 **이 문서를 가장 먼저 읽는다.** 자세한 경과는 맨 아래 "자세한 기록"의 파일에 있다.
 
@@ -14,6 +14,7 @@ ESP32 사족 로봇개(12개 서보, 다리당 3관절)를 웹 페이지 하나�
 | 항목 | 상태 |
 | --- | --- |
 | 펌웨어 | **보드에는 원래 펌웨어 `4ced7eb`(핫스팟 지원, `TRIM` 없음)가 올라가 있다.** 2026-11-13 밤 사용자 요청으로 되돌림, 해시 검증·부팅 확인 통과(`CAPS ... STA1`, AP `RobotDog-0FA1` 192.168.4.1 동작). 저장소 HEAD의 펌웨어(`TRIM`, `I2CDIAG` 포함)는 그 전에 올려 동작을 확인했으나 지금은 보드에 없다 |
+| **새 ESP32 보드 (2026-11-14)** | 사용자가 시험용으로 준비한 새 보드(ESP32-D0WD-V3, AP 이름 `RobotDog-AC25`)에 **저장소 HEAD 펌웨어를 전체(부트로더 0x1000·파티션 0x8000·boot_app0 0xe000·앱 0x10000) 업로드**했다. 앱 이미지 `verify-flash` 일치, 부팅 확인 통과: `CAPS ... STA1 TRIM1`, `STATE armed=0 walk=STOPPED settled=1 reset=POWERON`(브라운아웃 없음), AP 192.168.4.1. **로봇에 꽂지 않은 단독 상태**(서보·센서 없음)라 `I2C none`, `IMU_ERROR not_found`는 정상이다. `I2CDIAG sda=1/1/0 scl=1/1/0` → 아무것도 연결 안 됨, **GPIO22(SCL)가 0으로 잡혀 있지 않음(핀 정상)**. 저장된 값이 없어 보정값은 기본값이다(trim 9/1/-1/-9 `source=DEFAULT`, IMU 영점·축 설정·핫스팟 설정 없음). **다음: 서보 전원 OFF 상태에서 로봇에 옮겨 꽂고 `I2C`에 `0x40 0x68`이 나오는지 확인** → 나오면 기존 보드의 GPIO22 고장, 안 나오고 `scl=0/0/0`이면 선·센서 문제. 그 뒤 IMU 영점·축 설정을 새로 저장해야 한다 |
 | 수평 보정 | 코드 완료(펌웨어 `TRIM` + `level_calibrate.py`, 테스트 120개·컴파일 통과). **실물 보정은 못 함: I2C 버스 전체가 죽어 있음** (0x40 INA219, 0x68 IMU 둘 다 안 보임, 원래 펌웨어에서도 `I2C none`). `I2CDIAG` 결과 `sda=1/1/1 scl=0/0/0` → SCL(GPIO22) 선이 0으로 잡혀 있음. 선을 뽑은 상태의 측정은 아직 못 함(사용자가 선을 옮기지 않았다고 함) → **핀 고장인지 선·센서 문제인지 미확정**. 보정하려면 HEAD 펌웨어를 다시 올려야 한다 |
 | 핫스팟 기능 | 코드·QA 완료, **실물 미시험** (핫스팟 설정을 아직 저장하지 않음, `sta=OFF`) |
 | 3단계 보행 | 업로드됨, **바닥 실물 미시험** |
@@ -76,6 +77,7 @@ arduino-cli compile --fqbn esp32:esp32:esp32 --warnings default .
 - esptool이 리셋 신호를 줄 때 USB(CP210x)가 끊기며 `Cannot configure port`/`COM14 열 수 없음`이 나는 일이 잦다(2026-11-13에 4번 중 3번 실패). 몇 초 뒤 포트가 돌아오면 같은 명령을 다시 실행한다. 업로드 뒤에는 BOOT 버튼을 놓아야 정상 부팅한다. 부팅 후 `reset=BROWNOUT`이 자주 남는다(전원 흔들림 의심, 미해결).
 - 2026-11-13 밤: USB(CP210x)가 가만히 있어도 끊겼다 붙는 일이 있었다(전원 불안정 의심, `reset=BROWNOUT` 반복). 원인 미확인. 센서 선 4가닥을 모두 뽑고 USB 안정 여부를 보는 것이 다음 확인 순서.
 - SCL 핀을 19/23/32/33으로 옮길 수 있게 하는 펌웨어 변경안(`I2CSCL <핀>`, 컴파일·테스트 통과, 미업로드·미적용)은 `_workspace/2026-11-13_i2c-scl-pin-option.patch`에 있다. GPIO22 고장이 확인될 때만 `git apply`로 쓴다.
+- **새(빈) 보드 업로드 (2026-11-14에 쓴 방법)**: 앱만이 아니라 네 조각을 모두 쓴다. `arduino-cli upload`는 `Wrong boot mode (0x13)`으로 실패했다(새 보드도 자동 다운로드 모드 진입 안 됨). esptool을 `--before default-reset --after hard-reset --connect-attempts 0 write-flash -z --flash-mode keep --flash-freq keep --flash-size keep 0x1000 <빌드>\servoInitPose.ino.bootloader.bin 0x8000 <빌드>\servoInitPose.ino.partitions.bin 0xe000 %LOCALAPPDATA%\Arduino15\packages\esp32\hardware\esp32\3.3.12\tools\partitions\boot_app0.bin 0x10000 <빌드>\servoInitPose.ino.bin`로 백그라운드 실행하고, 사용자가 **BOOT를 누른 채 EN을 한 번 짧게** 누르면 연결된다. 마지막 앱 검증 단계에서 `Invalid head of packet`으로 끝났지만, BOOT를 누른 채 `--before no-reset --after no-reset verify-flash 0x10000 <앱>`으로 확인하니 일치했다. BOOT를 놓은 뒤 RTS 펄스로 리셋하면 정상 부팅한다.
 - **`merged.bin`(4 MB)은 쓰지 않는다.** 보드에 저장된 자세·IMU 영점·축 설정(NVS)을 덮을 수 있다.
 - 업로드 뒤 리셋하면 USB가 잠깐 끊겼다 돌아온다(`reset=BROWNOUT`/`WDT`가 남음, 리셋 순간 전원 흔들림으로 추정). 포트가 돌아오면 DTR/RTS를 내린 채 열어 `HELLO`, `CAPS`, `STATE`, `STATUS`, `WIFI`, `IMU`, `LEVEL`(읽기 전용)로 확인한다.
 
