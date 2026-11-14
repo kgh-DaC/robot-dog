@@ -13,6 +13,9 @@ Safety model (enforced by the firmware, mirrored here):
 - STOP is accepted from any session at any time.
 - The serial port is opened with DTR/RTS deasserted (no ESP32 reset) and is
   closed only after STOP and a settled, saved pose (no servo jump on reset).
+- "USB disconnect" on the page (DISCONNECT) does the same STOP + settle + close
+  and keeps the port released (for uploads, notebooks, unplugging) until the
+  page asks to CONNECT again; nothing re-arms after that either.
 - Listens on loopback only: there is no login, so it must not be exposed.
 """
 from __future__ import annotations
@@ -24,6 +27,7 @@ import re
 import sys
 import threading
 import time
+import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
@@ -116,6 +120,13 @@ def parse_stand_trim(line: str) -> dict | None:
     return dict(zip(("LF", "RF", "LH", "RH"), values))
 
 
+def parse_auto_walk_line(line: str) -> dict:
+    """AUTOWALK enabled=1 phase=IDLE delay=5000 run=10000 (walk forward after power-on)."""
+    f = _fields(line)
+    return {"enabled": f.get("enabled") == "1", "phase": f.get("phase", "IDLE"),
+            "delayMs": _num(f.get("delay")), "runMs": _num(f.get("run"))}
+
+
 def parse_wifi_line(line: str) -> dict | None:
     """``WIFI ssid=.. pass=.. ip=.. clients=N [sta=.. sta_ip=.. sta_ssid=<rest>]``.
 
@@ -177,6 +188,8 @@ class RobotLink:
         self.caps: set[str] = set()
         self._sensor_cache: tuple[float, dict | None, dict | None] | None = None
         self._stand_trim: dict | None = None  # from the last LEVEL line; None = firmware does not report it
+        self._auto_walk: dict | None = None   # from the last AUTOWALK line; None = firmware without AUTOWALK1
+        self._released = False  # True: the page asked to release the port; no reconnect until CONNECT
         self._wifi_read_at: float | None = None  # last WIFI line read (None = re-read on next status)
         self._serial = None
         self._last_attempt = None
@@ -277,6 +290,13 @@ class RobotLink:
                     pass
                 raise LinkError("usb_disconnected") from exc
             with self._lock:
+                if self._released:  # DISCONNECT arrived during the handshake: stay closed
+                    try:
+                        handle.close()
+                    except OSError:
+                        pass
+                    self.last_error = "usb_released"
+                    raise LinkError("usb_released")
                 self._serial = handle
                 self.wifi = wifi
                 self._wifi_read_at = self._clock()
@@ -289,6 +309,8 @@ class RobotLink:
         """Reconnect from a request thread. Never call this with ``_lock`` held."""
         if self.connected:
             return
+        if self._released:
+            raise LinkError("usb_released")
         if self._last_attempt is not None and self._clock() - self._last_attempt < RECONNECT_INTERVAL_S:
             raise LinkError("usb_disconnected")
         self.connect(handshake_s=POLL_HANDSHAKE_S)
@@ -303,6 +325,8 @@ class RobotLink:
         level_line = self._transact("LEVEL", "LEVEL ") if "LEVEL1" in self.caps else None
         level = parse_level_line(level_line) if level_line else None
         self._stand_trim = parse_stand_trim(level_line) if level_line else None
+        self._auto_walk = (parse_auto_walk_line(self._transact("AUTOWALK", "AUTOWALK "))
+                           if "AUTOWALK1" in self.caps else None)
         self._sensor_cache = (now, imu, level)
         return imu, level
 
@@ -345,15 +369,19 @@ class RobotLink:
                 imu, level = self._sensor_status()
                 wifi = self._wifi_status()
                 stand_trim = self._stand_trim
+                auto_walk = self._auto_walk
                 uptime = int(state.get("uptime", "0") or 0)
                 armed = state.get("armed") == "1"
                 if not armed or state.get("ctrl") != "SERIAL":
                     self.owner_session = None
                 owner = self.owner_session
         except LinkError as exc:
-            return {"link": "usb", "connected": self.connected, "serialPort": self.port,
-                    "error": exc.code if self.connected or exc.code == "usb_connecting"
-                    else (self.last_error or exc.code)}
+            reply = {"link": "usb", "connected": self.connected, "serialPort": self.port,
+                     "error": exc.code if self.connected or exc.code in ("usb_connecting", "usb_released")
+                     else (self.last_error or exc.code)}
+            if self._released:
+                reply["released"] = True
+            return reply
         except ValueError:
             return {"link": "usb", "connected": self.connected, "serialPort": self.port,
                     "error": "bad_status_reply"}
@@ -379,6 +407,8 @@ class RobotLink:
         }
         if stand_trim is not None:
             reply["standTrimDeg"] = stand_trim
+        if auto_walk is not None:
+            reply["autoWalk"] = auto_walk
         return reply
 
     def command(self, cmd: str, session: str | None, direction: str | None = None,
@@ -402,6 +432,18 @@ class RobotLink:
             return {"ok": True}
         if not session or not SESSION_RE.match(session):
             raise LinkError("invalid_session")
+        if cmd == "DISCONNECT":
+            # Release the serial port on request: STOP, wait for a settled and
+            # saved pose, close. The flag is set first so no poll reconnects.
+            self._released = True
+            settled = self.shutdown()
+            self.last_error = "usb_released"
+            return {"ok": True, "settled": settled}
+        if cmd == "CONNECT":
+            self._released = False
+            if not self.connected:
+                self.connect(handshake_s=POLL_HANDSHAKE_S)
+            return {"ok": True}
         if cmd == "ARM":
             self._ensure_connected()
         with self._lock:
@@ -428,6 +470,15 @@ class RobotLink:
                 return {"ok": True}
             if cmd in ("WIFI_SET", "WIFI_CLEAR"):
                 return self._wifi_settings(cmd, ssid, password)
+            if cmd == "AUTOWALK":  # walk forward after power-on: saved on the board, OFF by default
+                if "AUTOWALK1" not in self.caps:
+                    raise LinkError("firmware_without_autowalk")
+                if level_on not in ("1", "0"):
+                    raise LinkError("invalid_autowalk")
+                mode = "ON" if level_on == "1" else "OFF"
+                self._transact(f"AUTOWALK {mode}", f"OK AUTOWALK {mode}", exact=True, timeout_s=4.0)
+                self._sensor_cache = None
+                return {"ok": True}
             if session != self.owner_session:
                 raise LinkError("not_armed")
             if cmd == "HB":
@@ -480,7 +531,7 @@ class RobotLink:
             return settled
 
 
-ERROR_STATUS = {"usb_disconnected": 503, "usb_connecting": 503, "no_response": 504, "invalid_session": 400,
+ERROR_STATUS = {"usb_disconnected": 503, "usb_connecting": 503, "usb_released": 503, "invalid_autowalk": 400, "no_response": 504, "invalid_session": 400,
                 "invalid_direction": 400, "invalid_level": 400, "unknown_command": 400,
                 "invalid_ssid": 400, "invalid_password": 400}
 
@@ -559,6 +610,7 @@ def main(argv=None) -> int:
     parser.add_argument("--baud", type=int, default=115200)
     parser.add_argument("--http-port", type=int, default=8787)
     parser.add_argument("--host", default="127.0.0.1", help="IPv4 loopback address to listen on (127.x.x.x)")
+    parser.add_argument("--open", action="store_true", help="open the page in the default browser")
     args = parser.parse_args(argv)
 
     try:
@@ -570,7 +622,17 @@ def main(argv=None) -> int:
               file=sys.stderr)
         return 2
 
+    url = f"http://{args.host}:{args.http_port}"
+    allowed = {f"{args.host}:{args.http_port}", f"localhost:{args.http_port}"}
     link = RobotLink(args.port, args.baud)
+    try:
+        server = ThreadingHTTPServer((args.host, args.http_port), make_handler(link, allowed))
+    except OSError:
+        # Most likely this gateway is already running: just show its page.
+        print(f"Port {args.http_port} is in use; a gateway is probably running already. Open {url}")
+        if args.open:
+            webbrowser.open(url)
+        return 0
     try:
         link.connect()
         print(f"Connected to ESP32 on {args.port}.")
@@ -583,9 +645,9 @@ def main(argv=None) -> int:
     except LinkError:
         print(f"ESP32 not ready on {args.port} ({link.last_error}); will retry when the page polls.")
 
-    allowed = {f"{args.host}:{args.http_port}", f"localhost:{args.http_port}"}
-    server = ThreadingHTTPServer((args.host, args.http_port), make_handler(link, allowed))
-    print(f"Open http://{args.host}:{args.http_port}  (Ctrl+C to stop; robot stops before exit)")
+    print(f"Open {url}  (Ctrl+C to stop; robot stops before exit)")
+    if args.open:
+        webbrowser.open(url)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

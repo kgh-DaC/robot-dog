@@ -110,7 +110,7 @@ unsigned long nextWalkPhaseAt = 0;
 // Legacy serial "WALK <dir>" arms the serial controller implicitly, so it is
 // covered by the same lease. STOP is accepted from any source at any time.
 // Nothing re-arms automatically after a reset.
-enum Controller { CTRL_NONE, CTRL_SERIAL, CTRL_WIFI };
+enum Controller { CTRL_NONE, CTRL_SERIAL, CTRL_WIFI, CTRL_AUTO };  // AUTO: auto_walk.ino
 const uint16_t LEASE_TIMEOUT_MS = 1000;
 Controller controller = CTRL_NONE;
 bool armed = false;
@@ -384,7 +384,7 @@ void updateWalking()
 
 const char *controllerName(Controller value)
 {
-  return value == CTRL_SERIAL ? "SERIAL" : value == CTRL_WIFI ? "WIFI" : "NONE";
+  return value == CTRL_SERIAL ? "SERIAL" : value == CTRL_WIFI ? "WIFI" : value == CTRL_AUTO ? "AUTO" : "NONE";
 }
 
 const char *walkName(WalkDirection value)
@@ -417,6 +417,7 @@ void controlStop(const char *reason)
   armed = false;
   controller = CTRL_NONE;
   lastStopReason = reason;
+  autoWalkCancel();  // a stop during the power-on waiting time drops the pending run
   levelOnStop();  // leveling off, compensation cleared: plain neutral pose
 }
 
@@ -430,6 +431,7 @@ const char *controlArm(Controller source)
   const char *levelError = levelArmCheck();
   if (levelError != NULL) return levelError;
   if (!armed) levelOnArm();
+  if (source != CTRL_AUTO) autoWalkCancel();  // a person took control
   armed = true;
   controller = source;
   leaseDeadline = millis() + LEASE_TIMEOUT_MS;
@@ -584,7 +586,7 @@ void processCommand(char *line)
   }
 
   if (strcmp(command, "CAPS") == 0) {
-    Serial.println("CAPS SERVO_POSE_V1 WALK4 LEASE1 WIFI1 IMU1 LEVEL1 STA1 TRIM1");
+    Serial.println("CAPS SERVO_POSE_V1 WALK4 LEASE1 WIFI1 IMU1 LEVEL1 STA1 TRIM1 AUTOWALK1");
     return;
   }
 
@@ -606,6 +608,27 @@ void processCommand(char *line)
       return;
     }
     Serial.println(on ? "OK LEVEL ON" : "OK LEVEL OFF");
+    return;
+  }
+
+  if (strcmp(command, "AUTOWALK") == 0) {  // AUTOWALK | AUTOWALK ON | AUTOWALK OFF (auto_walk.ino)
+    char *mode = strtok_r(NULL, " 	", &save);
+    if (mode == NULL) {
+      printAutoWalk();
+      return;
+    }
+    if ((strcmp(mode, "ON") != 0 && strcmp(mode, "OFF") != 0) || strtok_r(NULL, " 	", &save) != NULL) {
+      Serial.println("ERR format_USE_AUTOWALK_ON_OFF");
+      return;
+    }
+    const bool on = strcmp(mode, "ON") == 0;
+    const char *error = autoWalkSet(on);
+    if (error != NULL) {
+      Serial.print("ERR ");
+      Serial.println(error);
+      return;
+    }
+    Serial.println(on ? "OK AUTOWALK ON" : "OK AUTOWALK OFF");
     return;
   }
 
@@ -817,6 +840,7 @@ void processCommand(char *line)
       Serial.println("ERR controlled_by_remote");
       return;
     }
+    autoWalkCancel();
     walkDirection = WALK_STOPPED;
     for (int i = 0; i < SERVO_COUNT; i++) {
       setTargetAngle(i, neutralAngle(i));
@@ -856,6 +880,7 @@ void processCommand(char *line)
       return;
     }
 
+    autoWalkCancel();
     setTargetAngle(index, angle);
     Serial.print("OK SET ");
     Serial.print(LEG_NAMES[leg]);
@@ -901,6 +926,7 @@ void processCommand(char *line)
         setTargetAngle(leg * 3 + joint, angles[joint]);
       }
     }
+    autoWalkCancel();
     Serial.println("OK POSE");
     return;
   }
@@ -1050,6 +1076,7 @@ void setup()
   Serial.println(resetReasonName());
   Serial.println(startupHoming ? "SERVO_OUTPUTS_HOMING" : "SERVO_OUTPUTS_NEUTRAL");
   imuSetup();  // read only; a missing sensor does not block anything in stage 1
+  autoWalkSetup();  // optional walk after power-on; OFF unless saved ON
   webSetup();
   // The web task may already be running: read shared state under the mutex.
   xSemaphoreTake(controlMutex, portMAX_DELAY);
@@ -1070,6 +1097,7 @@ void loop()
   readSerialCommands();
   imuUpdate();
   levelUpdate();  // tilt-limit stop, sensor-lost stop, leveling compensation
+  autoWalkUpdate();  // power-on auto walk: start after the delay, stop after the run time
   updateLease();
   updateWalking();
   updateServoPulses();

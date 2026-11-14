@@ -92,6 +92,9 @@ input{font:inherit;border:1px solid var(--line);border-radius:10px;background:va
       <input id="hsAddr" placeholder="로봇 주소 (예: 172.20.10.3 또는 robotdog.local)" autocomplete="off" spellcheck="false" aria-label="로봇 주소">
       <button id="hsGo">이 주소로 접속</button>
     </div>
+    <div class="row" id="usbLinkRow" hidden style="margin-top:8px">
+      <button id="usbLink">USB 연결 끊기</button>
+    </div>
     <p class="note" style="margin-top:8px">현재 대상: <span id="connTarget" class="target">-</span></p>
     <p class="note" id="connNote"></p>
   </section>
@@ -217,6 +220,15 @@ input{font:inherit;border:1px solid var(--line);border-radius:10px;background:va
     </div>
   </section>
 
+  <section class="card" id="autoCard" hidden>
+    <div class="lvhead">
+      <h2>전원 켤 때 자동 전진</h2>
+      <button id="autoToggle" class="lvtoggle">자동 전진 켜기</button>
+    </div>
+    <div class="kv" style="margin:6px 0 10px">상태<b id="autoState">-</b></div>
+    <p class="note" id="autoNote">켜 두면 로봇 전원을 넣을 때마다 잠시 기다린 뒤 조종 없이 앞으로 걷고, 정해진 시간이 지나면 스스로 멈춰 중립 자세로 돌아갑니다. 설정은 로봇 보드에 저장됩니다(USB 게이트웨이에서만 바꿀 수 있음). 전원을 켤 때만 동작하고, 전원 흔들림·오류로 재부팅된 경우에는 걷지 않습니다. 기다리는 동안이나 걷는 동안 긴급 정지를 누르면 취소됩니다. 조종자가 없는 동작이므로 로봇 앞을 비우고 전원 스위치를 손 닿는 곳에 두세요.</p>
+  </section>
+
   <section class="card" id="wifiCard" hidden>
     <div class="kv">ESP32 Wi-Fi 접속 정보 (USB 게이트웨이에서만 표시)<b id="wifiInfo" class="wifi">-</b></div>
     <div id="hsSet" hidden style="margin-top:14px">
@@ -245,7 +257,7 @@ input{font:inherit;border:1px solid var(--line);border-radius:10px;background:va
   var state = null, lastOk = 0, busy = false;
   var $ = function (id) { return document.getElementById(id); };
   var DIR_KO = { STOPPED: "정지", FORWARD: "앞으로", BACKWARD: "뒤로", LEFT: "왼쪽", RIGHT: "오른쪽" };
-  var CTRL_KO = { NONE: "없음", SERIAL: "USB", WIFI: "Wi-Fi" };
+  var CTRL_KO = { NONE: "없음", SERIAL: "USB", WIFI: "Wi-Fi", AUTO: "자동 전진" };
   var ERR_KO = {
     controlled_by_other: "다른 장치가 제어 중입니다.", not_armed: "먼저 움직임을 활성화하세요.",
     homing_in_progress: "시작 자세로 복귀 중입니다. 잠시 후 다시 시도하세요.",
@@ -257,10 +269,13 @@ input{font:inherit;border:1px solid var(--line);border-radius:10px;background:va
     invalid_ssid: "핫스팟 이름은 1~32바이트이고 탭·제어 문자를 쓸 수 없습니다.",
     invalid_password: "비밀번호는 비우거나(공개망) 영문·숫자·기호 8~63자여야 합니다.",
     firmware_without_hotspot: "이 펌웨어는 핫스팟 연결을 지원하지 않습니다. 펌웨어를 업데이트하세요.",
-    bad_host: "로봇이 이 주소로 온 요청을 거부했습니다. IP 주소나 robotdog.local을 쓰세요."
+    bad_host: "로봇이 이 주소로 온 요청을 거부했습니다. IP 주소나 robotdog.local을 쓰세요.",
+    usb_released: "USB 연결을 끊어 둔 상태입니다. “USB 다시 연결”을 누르세요.",
+    usb_connecting: "USB 연결을 시도하는 중입니다. 잠시 후 다시 누르세요.",
+    firmware_without_autowalk: "이 펌웨어는 자동 전진을 지원하지 않습니다. 펌웨어를 업데이트하세요."
   };
   var STOP_KO = { tilt_limit: "기울기 한계 초과로 자동 정지", imu_lost: "센서 값 끊김으로 자동 정지",
-    heartbeat_timeout: "하트비트 끊김으로 자동 정지", level_diverge: "수평 보정이 반대로 작동해 자동 정지 (부호 확인 필요)" };
+    heartbeat_timeout: "하트비트 끊김으로 자동 정지", autowalk_done: "자동 전진 시간이 끝나 정지", level_diverge: "수평 보정이 반대로 작동해 자동 정지 (부호 확인 필요)" };
 
   // ---- connection mode: USB gateway or phone hotspot ------------------------
   // The page is served either by the USB gateway (http://127.0.0.1:8787) or by
@@ -368,7 +383,8 @@ input{font:inherit;border:1px solid var(--line);border-radius:10px;background:va
     $("link").className = "badge " + (fresh ? "ok" : "bad");
     $("linkText").textContent = !state ? (pollFails > 2 ? "응답 없음 (주소·연결 확인)" : "연결 확인 중") :
       (state.link === "usb" ? "USB 게이트웨이" : "ESP32 Wi-Fi") +
-      (fresh ? " 연결됨" : state.connected && state.error ? " 응답 없음 (" + state.error + ")" : " 연결 끊김");
+      (fresh ? " 연결됨" : state.released ? " 연결 끊음 (포트를 놓은 상태)" :
+        state.connected && state.error ? " 응답 없음 (" + state.error + ")" : " 연결 끊김");
     var mine = fresh && state.armed && state.youControl;
     $("arm").disabled = !fresh || state.armed || state.homing;
     $("disarm").disabled = !mine;
@@ -387,7 +403,8 @@ input{font:inherit;border:1px solid var(--line);border-radius:10px;background:va
       ["sArmed", "sCtrl", "sWalk", "sSettled"].forEach(function (id) { $(id).textContent = "알 수 없음"; });
       ["sStop", "sReset"].forEach(function (id) { $(id).textContent = "-"; });
     } else {
-      $("sArmed").textContent = state.armed ? (state.youControl ? "활성 (이 페이지)" : "활성 (다른 장치)") : "비활성";
+      $("sArmed").textContent = state.armed ? (state.youControl ? "활성 (이 페이지)" :
+        state.controller === "AUTO" ? "활성 (자동 전진 - 정지하려면 긴급 정지)" : "활성 (다른 장치)") : "비활성";
       $("sCtrl").textContent = CTRL_KO[state.controller] || state.controller;
       $("sWalk").textContent = (DIR_KO[state.walk] || state.walk) + (state.homing ? " · 시작 자세 복귀 중" : "");
       $("sSettled").textContent = state.settled ? "저장됨" : "이동 중";
@@ -442,6 +459,22 @@ input{font:inherit;border:1px solid var(--line);border-radius:10px;background:va
       : "브라우저가 로봇에 직접 접속합니다. 노트북과 로봇이 같은 핫스팟에 있어야 합니다." +
         (corsOk ? "" : " 주의: 로봇은 http://127.0.0.1:8787 또는 http://localhost:8787 에서 연 페이지의 요청만 받습니다. 지금 주소(" +
           LOC.host + ")에서는 응답이 오지 않으니 게이트웨이를 8787 포트로 실행하세요.");
+    // USB link button: release the serial port (robot is stopped first) or take it again.
+    var released = !!(state && state.link === "usb" && state.released);
+    $("usbLinkRow").hidden = !(onGateway && conn.mode === "usb");
+    $("usbLink").textContent = released ? "USB 다시 연결" : "USB 연결 끊기";
+    $("usbLink").disabled = !state || state.link !== "usb" || cmdBusy > 0;
+    // Auto walk after power-on: shown only when the firmware reports it (USB link).
+    var aw = usbFresh ? state.autoWalk : null;
+    $("autoCard").hidden = !aw;
+    if (aw) {
+      var secs = function (ms) { return isFinite(ms) && ms !== null ? Math.round(ms / 100) / 10 + "초" : "?"; };
+      $("autoToggle").textContent = aw.enabled ? "자동 전진 끄기" : "자동 전진 켜기";
+      $("autoToggle").classList.toggle("on", !!aw.enabled);
+      $("autoToggle").disabled = !aw.enabled && state.armed;
+      $("autoState").textContent = (aw.enabled ? "켜짐" : "꺼짐") + " · 전원 후 " + secs(aw.delayMs) + " 대기, " + secs(aw.runMs) + " 전진" +
+        (aw.phase === "WAITING" ? " · 곧 출발 (대기 중)" : aw.phase === "RUNNING" ? " · 자동 전진 중" : "");
+    }
     // Hotspot settings: only over a fresh USB link with firmware that reports the hotspot.
     $("hsSet").hidden = !(usbFresh && sta);
     if (usbFresh && sta) {
@@ -466,6 +499,15 @@ input{font:inherit;border:1px solid var(--line);border-radius:10px;background:va
       .then(function () { $("hsPass").value = ""; });
   };
   $("hsClear").onclick = function () { command({ cmd: "WIFI_CLEAR" }, "저장된 핫스팟 설정을 지웠습니다."); };
+  $("usbLink").onclick = function () {
+    if (state && state.released) command({ cmd: "CONNECT" }, "USB를 다시 연결했습니다. 움직이려면 다시 활성화하세요.");
+    else command({ cmd: "DISCONNECT" }, "로봇을 정지시키고 USB 포트를 놓았습니다. 이제 다른 프로그램이 포트를 쓰거나 USB를 뽑아도 됩니다.");
+  };
+  $("autoToggle").onclick = function () {
+    var on = !(state && state.autoWalk && state.autoWalk.enabled);
+    if (on && !window.confirm("다음에 전원을 켤 때부터 로봇이 조종 없이 앞으로 걷습니다. 켤까요?")) return;
+    command({ cmd: "AUTOWALK", on: on ? "1" : "0" }, on ? "자동 전진을 켰습니다. 다음 전원 인가부터 적용됩니다." : "자동 전진을 껐습니다.");
+  };
 
   // ---- level monitor: numbers + 30 s chart --------------------------------
   var LV_WINDOW_MS = 30000, LV_GAP_MS = 1200;
