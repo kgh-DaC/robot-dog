@@ -2,6 +2,7 @@
 
 Built from 회로도.jpg (Fritzing breadboard view) and the pin table in
 esp32-robot-dog-code-master/tools/servoInitPose/servoInitPose.ino.
+ESP32 board: 30-pin DevKit V1 (user confirmed 2026-11-16).
 
 One script holds the netlist, placement and routing, then:
   * checks clearances and that every net is connected (DRC),
@@ -94,21 +95,25 @@ def txt(s, x, y, h=1.0, rot=0, layer="F", anchor="c"):
 
 # ------------------------------------------------------------ placement
 P = 2.54
-Y0 = 2.5                     # first ESP32 header pin (3V3 / GND), antenna end at the top edge
-XL, XR = 12.3, 37.7          # ESP32 DevKitC 38-pin rows, 25.4 mm apart
+Y0 = 8.0                     # first ESP32 header pin (EN / D23); antenna end overhangs the top edge
+XL = 12.3                    # left header row
+XR = 37.7                    # right row for 25.4 mm (1.0") wide 30-pin boards (DOIT DevKit V1, ~28 mm wide)
+XR2 = XR - P                 # right row for 22.86 mm (0.9") narrow 30-pin clones; fit ONE female header
+NPIN = 15
 
 
 def ry(i):
     return round(Y0 + P * i, 3)
 
 
-ESP_L = ["3V3", "EN", "VP", "VN", "34", "35", "32", "33", "25", "26", "27", "14", "12", "GND", "13", "SD2", "SD3", "CMD", "5V"]
-ESP_R = ["GND", "23", "22", "TX", "RX", "21", "GND", "19", "18", "5", "17", "16", "4", "0", "2", "15", "SD1", "SD0", "CLK"]
+# ESP32 DevKit V1 30-pin, antenna up, seen from the top
+ESP_L = ["EN", "VP", "VN", "34", "35", "32", "33", "25", "26", "27", "14", "12", "13", "GND", "VIN"]
+ESP_R = ["23", "22", "TX", "RX", "21", "19", "18", "5", "17", "16", "4", "2", "15", "GND", "3V3"]
 
 # (row index on the ESP32 header, joint name, GPIO)  -- servos[] in servoInitPose.ino:
 # LF {25,26,27}  RF {16,18,17}  LH {13,12,14}  RH {4,2,15}  (each ALPHA, BETA, GAMMA)
-LEFT_SERVOS = [(8, "LF-A", 25), (9, "LF-B", 26), (10, "LF-G", 27), (11, "LH-G", 14), (12, "LH-B", 12), (14, "LH-A", 13)]
-RIGHT_SERVOS = [(8, "RF-B", 18), (10, "RF-G", 17), (11, "RF-A", 16), (12, "RH-A", 4), (14, "RH-B", 2), (15, "RH-G", 15)]
+LEFT_SERVOS = [(7, "LF-A", 25), (8, "LF-B", 26), (9, "LF-G", 27), (10, "LH-G", 14), (11, "LH-B", 12), (12, "LH-A", 13)]
+RIGHT_SERVOS = [(6, "RF-B", 18), (8, "RF-G", 17), (9, "RF-A", 16), (10, "RH-A", 4), (11, "RH-B", 2), (12, "RH-G", 15)]
 
 
 def esp_net(side, i):
@@ -117,7 +122,7 @@ def esp_net(side, i):
         return "GND"
     if name == "3V3":
         return "+3V3"
-    if name == "5V":
+    if name == "VIN":
         return "+5V_ESP"
     if name == "21":
         return "SDA"
@@ -129,23 +134,31 @@ def esp_net(side, i):
     return None   # unused pin (no net)
 
 
-# U1: ESP32 DevKitC (38 pin) on two 1x19 female headers
-u1 = fp("U1", "ESP32-DevKitC-38P", 25.0, ry(9), "ESP32 DevKitC V4 38-pin, 2x 1x19 female header 2.54mm, rows 25.4mm apart")
-for i in range(19):
+# U1: ESP32 DevKit V1 30-pin on 1x15 female headers (right row has two hole columns)
+u1 = fp("U1", "ESP32-DevKit-30P", 25.0, ry(7), "ESP32 DevKit V1 30-pin, 1x15 female headers; right row 25.4 or 22.86 mm")
+for i in range(NPIN):
     u1.pad(i + 1, XL, ry(i), esp_net("L", i), shape="rect" if i == 0 else "circle")
-    u1.pad(20 + i, XR, ry(i), esp_net("R", i))
+    u1.pad(16 + i, XR, ry(i), esp_net("R", i))
+    u1.pad(31 + i, XR2, ry(i), esp_net("R", i))
 for x in (XL, XR):
-    u1.rect(x - 1.27, ry(0) - 1.27, x + 1.27, ry(18) + 1.27)
-u1.rect(11.0, ry(0) - 6.4, 39.0, ry(18) + 2.3, layer="fab")     # DevKitC board outline (raised on sockets)
+    u1.rect(x - 1.27, ry(0) - 1.27, x + 1.27, ry(NPIN - 1) + 1.27)
+u1.rect(11.0, ry(0) - 12.4, 39.0, ry(NPIN - 1) + 3.5, layer="fab")     # 28 x 51.5 board outline (raised)
 
-# U2: MPU9250 (GY-9250) 1x10 header, column right of centre under the ESP32
-MPU_X = 33.5
+# U2: MPU9250 (GY-9250) 1x10 header, its SCL pin level with the ESP32 SCL pin
+MPU_X = 31.5
+MY0 = ry(1) - 2 * P
 MPU_PINS = ["VCC", "GND", "SCL", "SDA", "EDA", "ECL", "AD0", "INT", "NCS", "FSYNC"]
 MPU_NETS = ["+3V3", "GND", "SCL", "SDA", None, None, "GND", None, None, None]   # AD0 -> GND (I2C 0x68)
-u2 = fp("U2", "MPU9250 (GY-9250)", 27.0, ry(4.5), "MPU9250 module 25.5x15.5, 1x10 header")
+
+
+def my(k):
+    return round(MY0 + P * k, 3)
+
+
+u2 = fp("U2", "MPU9250 (GY-9250)", 25.0, my(4.5), "MPU9250 module 25.5x15.5, 1x10 header")
 for k in range(10):
-    u2.pad(k + 1, MPU_X, ry(k), MPU_NETS[k], shape="rect" if k == 0 else "circle")
-u2.rect(MPU_X - 14.2, ry(0) - 1.3, MPU_X + 1.3, ry(0) - 1.3 + 25.5)
+    u2.pad(k + 1, MPU_X, my(k), MPU_NETS[k], shape="rect" if k == 0 else "circle")
+u2.rect(MPU_X - 14.2, my(0) - 1.3, MPU_X + 1.3, my(0) - 1.3 + 25.5)
 
 # U3: INA219 module (Adafruit 904 order), 1x6 header, bottom middle (USB plug passes above it)
 INA_Y = 51.0
@@ -168,24 +181,29 @@ def mini360(ref, value, pads, outline, desc):
     return f
 
 
-# PS1: ESP32 buck (5.2 V), horizontal, under the ESP32.  OUT end left, + side down.
-cx, cy = 25.0, 34.3
+# PS1: ESP32 buck (5.2 V), horizontal, under the ESP32 below the MPU.  OUT end left, + side down.
+PS1C = (23.6, 36.1)
+cx, cy = PS1C
 ps1 = mini360("PS1", "Mini360 -> 5.2V (ESP32)", [
     (1, "IN+", cx + 7.2, cy + 4.2, "VIN_BUCK", False), (2, "IN-", cx + 7.2, cy - 4.2, "GND", False),
     (3, "OUT+", cx - 7.2, cy + 4.2, "+5V_ESP", False), (4, "OUT-", cx - 7.2, cy - 4.2, "GND", False)],
     (cx - 8.6, cy - 5.6, cx + 8.6, cy + 5.6), "Mini360 buck 17.2x11.2")
+PS1_OUTP = (cx - 7.2, cy + 4.2)
+PS1_INP = (cx + 7.2, cy + 4.2)
 # PS2: left servo rail (6 V), vertical, OUT end up, + side towards the ESP32
-cx, cy = 5.6, 49.0
+cx, cy = 5.6, 49.5
 ps2 = mini360("PS2", "Mini360 -> 6V (servo L)", [
     (1, "IN+", cx + 4.2, cy + 7.2, "VIN_BUCK", True), (2, "IN-", cx - 4.2, cy + 7.2, "GND", True),
     (3, "OUT+", cx + 4.2, cy - 7.2, "+6V_SRV_L", True), (4, "OUT-", cx - 4.2, cy - 7.2, "GND", True)],
     (cx - 5.6, cy - 8.6, cx + 5.6, cy + 8.6), "Mini360 buck 17.2x11.2")
+PS2_OUTP, PS2_INP = (cx + 4.2, cy - 7.2), (cx + 4.2, cy + 7.2)
 # PS3: right servo rail (6 V), mirrored
-cx, cy = 44.4, 51.6
+cx, cy = 44.4, 49.5
 ps3 = mini360("PS3", "Mini360 -> 6V (servo R)", [
     (1, "IN+", cx - 4.2, cy + 7.2, "VIN_BUCK", True), (2, "IN-", cx + 4.2, cy + 7.2, "GND", True),
     (3, "OUT+", cx - 4.2, cy - 7.2, "+6V_SRV_R", True), (4, "OUT-", cx + 4.2, cy - 7.2, "GND", True)],
     (cx - 5.6, cy - 8.6, cx + 5.6, cy + 8.6), "Mini360 buck 17.2x11.2")
+PS3_OUTP, PS3_INP = (cx - 4.2, cy - 7.2), (cx - 4.2, cy + 7.2)
 
 # Servo headers 1x3 (pin1 = signal, square). Left: GND outer, V+ middle, S inner.
 LS = {"GND": 2.6, "V": 5.14, "S": 7.68}
@@ -201,6 +219,8 @@ for side, lst, xs, rail in (("L", LEFT_SERVOS, LS, "+6V_SRV_L"), ("R", RIGHT_SER
         f.pad(3, xs["GND"], y, "GND")
         SERVO_FPS.append((f, side, i, joint, gpio))
         n += 1
+LAST_L = ry(max(i for (i, j, g) in LEFT_SERVOS))
+LAST_R = ry(max(i for (i, j, g) in RIGHT_SERVOS))
 
 # J1: battery input after the external switch (3.5 mm screw terminal), bottom-right corner
 j1 = fp("J1", "BAT (after switch)", 43.25, 66.2, "2-pin screw terminal 3.5mm (KF350-2P)")
@@ -209,10 +229,11 @@ j1.pad(2, 45.0, 66.2, "GND", shape="circle", w=2.2, drill=1.2)
 j1.rect(39.75, 62.6, 46.75, 69.8)
 
 # Capacitors
-c1 = fp("C1", "470uF 10V (6.3mm)", 19.05, 44.2, "radial 6.3mm, pitch 2.5")
-c1.pad(1, 17.8, 44.2, "+5V_ESP", shape="rect", w=1.6, drill=0.8)
-c1.pad(2, 20.3, 44.2, "GND", w=1.6, drill=0.8)
-c1.silk.append(("circle", (19.05, 44.2, 3.25)))
+C1Y = 45.5
+c1 = fp("C1", "470uF 10V (6.3mm)", 19.0, C1Y, "radial 6.3mm, pitch 2.5")
+c1.pad(1, 17.75, C1Y, "+5V_ESP", shape="rect", w=1.6, drill=0.8)
+c1.pad(2, 20.25, C1Y, "GND", w=1.6, drill=0.8)
+c1.silk.append(("circle", (19.0, C1Y, 3.25)))
 CL_X, CR_X = 5.14, 44.86
 c2 = fp("C2", "1000uF 10V (8mm)", CL_X, 15.0, "radial 8mm, pitch 3.5")
 c2.pad(1, CL_X, 16.75, "+6V_SRV_L", shape="rect", w=1.8, drill=1.0)
@@ -231,96 +252,112 @@ for k, (x, y) in enumerate(MH):
     f.silk.append(("circle", (x, y, 3.0)))
 
 # ----------------------------------------------------------------- routing
+# both right hole columns carry the same signal
+for i in range(NPIN):
+    if esp_net("R", i):
+        trk("F", 0.4, [(XR2, ry(i)), (XR, ry(i))], esp_net("R", i))
 # servo signals (straight, top)
 for (f, side, i, joint, gpio) in SERVO_FPS:
     xs = (LS if side == "L" else RS)["S"]
     trk("F", 0.4, [(xs, ry(i)), (XL if side == "L" else XR, ry(i))], esp_net(side, i))
 # servo rails: column on both layers, cap at the top, buck at the bottom
 for lay in ("F", "B"):
-    trk(lay, 1.5, [(CL_X, 16.75), (CL_X, ry(14))], "+6V_SRV_L")
-    trk(lay, 1.5, [(CR_X, 16.75), (CR_X, ry(15))], "+6V_SRV_R")
-trk("F", 2.0, [(CL_X, ry(14)), (CL_X, 39.6), (7.34, 41.8), (9.8, 41.8)], "+6V_SRV_L")
-trk("F", 2.0, [(CR_X, ry(15)), (CR_X, 42.2), (42.66, 44.4), (40.2, 44.4)], "+6V_SRV_R")
+    trk(lay, 1.5, [(CL_X, 16.75), (CL_X, LAST_L)], "+6V_SRV_L")
+    trk(lay, 1.5, [(CR_X, 16.75), (CR_X, LAST_R)], "+6V_SRV_R")
+trk("F", 2.0, [(CL_X, LAST_L), (CL_X, LAST_L + 1.5), (PS2_OUTP[0] - 2.36, PS2_OUTP[1]), PS2_OUTP], "+6V_SRV_L")
+trk("F", 2.0, [(CR_X, LAST_R), (CR_X, LAST_R + 1.5), (PS3_OUTP[0] + 2.36, PS3_OUTP[1]), PS3_OUTP], "+6V_SRV_R")
 
 # battery (after switch) -> INA219 VIN+   (top)
 trk("F", 2.0, [(41.5, 66.2), (37.0, 61.7), (37.0, 53.4), (34.6, 51.0), (INA_X[5], INA_Y)], "VBAT_SW")
 # INA219 VIN- -> three bucks   (bottom)
 trk("B", 2.0, [(INA_X[4], INA_Y), (INA_X[4], 55.0)], "VIN_BUCK")
-trk("B", 2.0, [(9.8, 56.2), (11.0, 55.0), (36.0, 55.0), (39.6, 58.6), (40.2, 58.8)], "VIN_BUCK")
-trk("B", 2.0, [(INA_X[4], INA_Y), (INA_X[4], 48.6), (32.2, 45.2), (32.2, 38.5)], "VIN_BUCK")
-# 5 V: PS1 OUT+ -> C1+ -> ESP32 5V pin   (top)
-trk("F", 1.0, [(17.8, 38.5), (17.8, 44.2), (17.8, 45.6), (15.18, ry(18)), (XL, ry(18))], "+5V_ESP")
-# 3V3: ESP32 3V3 -> MPU VCC, and down to INA219 VCC (via to bottom near the end)
-trk("F", 0.5, [(XL, ry(0)), (MPU_X, ry(0))], "+3V3")
-trk("F", 0.5, [(15.0, ry(0)), (15.0, 42.6)], "+3V3")
-VIAS.append((15.0, 42.6, "+3V3"))
-trk("B", 0.5, [(15.0, 42.6), (15.0, 48.0), (18.0, INA_Y), (INA_X[0], INA_Y)], "+3V3")
-# I2C
-trk("F", 0.3, [(XR, ry(2)), (MPU_X, ry(2))], "SCL")
-trk("F", 0.3, [(MPU_X, ry(2)), (30.5, ry(2)), (30.5, 27.7), (34.3, 27.7), (34.3, 42.0), (24.5, 42.0), (INA_X[2], 42.77), (INA_X[2], INA_Y)], "SCL")
-trk("F", 0.3, [(XR, ry(5)), (35.6, ry(5)), (35.6, 11.5), (34.22, ry(3)), (MPU_X, ry(3))], "SDA")
-trk("F", 0.3, [(MPU_X, ry(3)), (31.6, ry(3)), (31.6, 26.8), (35.4, 26.8), (35.4, 44.5), (27.0, 44.5), (INA_X[3], 45.23), (INA_X[3], INA_Y)], "SDA")
-# MPU9250 AD0 -> GND (explicit trace to the ESP32 GND pin on the same row) => address 0x68
-trk("F", 0.4, [(MPU_X, ry(6)), (XR, ry(6))], "GND")
+trk("B", 2.0, [PS2_INP, (PS2_INP[0] + 1.7, 55.0), (36.0, 55.0), (PS3_INP[0] - 2.5, PS3_INP[1]), PS3_INP], "VIN_BUCK")
+trk("B", 2.0, [(INA_X[4], INA_Y), (INA_X[4], 49.5), (PS1_INP[0], 47.5), PS1_INP], "VIN_BUCK")
+# 5 V: PS1 OUT+ -> C1+ -> ESP32 VIN pin   (top)
+trk("F", 1.0, [PS1_OUTP, (PS1_OUTP[0], 42.2), (17.75, 43.55), (17.75, C1Y)], "+5V_ESP")
+trk("F", 1.0, [(PS1_OUTP[0], 42.2), (PS1_OUTP[0] - 1.36, ry(14)), (XL, ry(14))], "+5V_ESP")
+# 3V3 (ESP32 right row, bottom pin): up to MPU VCC on the bottom layer, across to INA219 VCC on top
+X3 = 33.33                    # channel between the MPU column and the narrow right row
+trk("B", 0.5, [(XR2, ry(14)), (X3, ry(14) - 1.83), (X3, my(0)), (MPU_X, my(0))], "+3V3")
+trk("F", 0.5, [(XR2, ry(14)), (33.0, 45.72), (22.5, 45.72), (22.5, 48.0), (20.0, 48.0), (INA_X[0], 49.35), (INA_X[0], INA_Y)], "+3V3")
+# I2C: ESP32 -> MPU on top, MPU -> INA219 on the bottom
+trk("F", 0.3, [(XR2, ry(1)), (MPU_X, my(2))], "SCL")
+trk("F", 0.3, [(XR2, ry(4)), (X3, ry(4)), (X3, my(3) + 1.12), (MPU_X + 0.7, my(3)), (MPU_X, my(3))], "SDA")
+trk("B", 0.3, [(MPU_X, my(2)), (27.0, my(2)), (27.0, 47.0), (INA_X[2], 50.27), (INA_X[2], INA_Y)], "SCL")
+trk("B", 0.3, [(MPU_X, my(3)), (28.0, my(3)), (28.0, 47.5), (INA_X[3], 49.23), (INA_X[3], INA_Y)], "SDA")
+# MPU9250 AD0 -> GND: explicit trace up to the module's own GND pin => address 0x68
+trk("F", 0.4, [(MPU_X, my(6)), (29.9, my(6)), (29.9, my(1)), (MPU_X, my(1))], "GND")
+# ESP32 GND pins tied together on top as well (pour also joins them)
+trk("F", 0.6, [(XL, ry(13)), (XL + 1.9, ry(13))], "GND")
 
 # ------------------------------------------------------------------ silk
+# per header: joint letter + GPIO, e.g. "A25" (A = ALPHA hip, B = BETA shoulder, G = GAMMA knee)
 for (f, side, i, joint, gpio) in SERVO_FPS:
-    if side == "L":
-        txt(str(gpio), 9.95, ry(i), 0.9)
-    else:
-        txt(str(gpio), 40.05, ry(i), 0.9)
+    label = joint.split("-")[1] + str(gpio)
+    txt(label, 9.8 if side == "L" else 40.2, ry(i), 0.8)
+# a short line on the outer edge where one leg's group ends and the next begins
+for side, lst, x1, x2 in (("L", LEFT_SERVOS, 0.25, 1.75), ("R", RIGHT_SERVOS, 48.25, 49.75)):
+    for (a, b) in zip(lst, lst[1:]):
+        if a[1][:2] != b[1][:2]:
+            yb = (ry(a[0]) + ry(b[0])) / 2
+            fpj = next(f for (f, s, i, j, g) in SERVO_FPS if s == side and i == b[0])
+            fpj.silk.append(("line", (x1, yb, x2, yb)))
+for k, s in enumerate(("A:ALPHA", "B:BETA", "G:GAMMA")):
+    txt(s, 5.6, 59.3 + k * 1.3, 0.8)
+SY = min(ry(LEFT_SERVOS[0][0]), ry(RIGHT_SERVOS[0][0])) - 1.85
 for x, s in ((LS["GND"], "-"), (LS["V"], "+"), (LS["S"], "S"), (RS["GND"], "-"), (RS["V"], "+"), (RS["S"], "S")):
-    txt(s, x, 20.75, 1.0)
-txt("LF", 0.95, ry(9), 1.0, rot=90)
-txt("LH", 0.95, ry(12.5), 1.0, rot=90)
-txt("RF", 49.05, ry(10), 1.0, rot=90)
-txt("RH", 49.05, ry(13.5), 1.0, rot=90)
+    txt(s, x, SY, 1.0)
+txt("LF", 0.95, ry(8), 1.0, rot=90)
+txt("LH", 0.95, ry(11), 1.0, rot=90)
+txt("RF", 49.05, ry(7.5), 1.0, rot=90)
+txt("RH", 49.05, ry(11), 1.0, rot=90)
 for k, name in enumerate(MPU_PINS):
-    txt(name[:3] if name != "FSYNC" else "FSY", 32.3, ry(k), 0.9, anchor="r")
-txt("AD0=GND", 23.5, ry(6), 1.0)
-txt("MPU9250", 25.5, ry(8.5), 1.2)
+    txt(name[:3] if name != "FSYNC" else "FSY", 29.4, my(k), 0.9, anchor="r")
+txt("AD0=GND", 23.0, my(7.4), 1.0)
+txt("MPU9250", 21.3, my(5.0), 1.1)
 for k, name in enumerate(INA_PINS):
     txt(name, INA_X[k], INA_Y + 1.6, 0.9, rot=90, anchor="r")
 txt("INA219", 25.0, 61.0, 1.4)
 txt("(no screw terminal)", 25.0, 63.2, 1.0)
 # buck labels
-txt("PS1 5.2V", 25.0, 33.2, 1.1)
-txt("IN", 29.6, 36.6, 0.9)
-txt("OUT", 20.6, 36.6, 0.9)
-txt("+", 17.8, 40.35, 0.9)
-txt("+", 32.2, 40.35, 0.9)
-txt("PS2 6V", 5.6, 49.0, 1.0, rot=90)
-txt("OUT", 5.6, 43.4, 0.9)
-txt("IN", 5.6, 54.6, 0.9)
-txt("+", 9.8, 39.75, 0.9)
-txt("+", 9.8, 58.2, 0.9)
-txt("PS3 6V", 44.4, 51.6, 1.0, rot=90)
-txt("OUT", 44.4, 46.0, 0.9)
-txt("IN", 44.4, 57.2, 0.9)
-txt("+", 40.2, 42.4, 0.9)
-txt("+", 40.2, 61.0, 0.9)
+txt("PS1 5.2V", PS1C[0], PS1C[1] - 1.0, 1.1)
+txt("IN", PS1C[0] + 4.6, PS1C[1] + 2.3, 0.9)
+txt("OUT", PS1C[0] - 4.4, PS1C[1] + 2.3, 0.9)
+txt("+", PS1_OUTP[0], PS1_OUTP[1] - 2.0, 0.9)
+txt("+", PS1_INP[0], PS1_INP[1] - 2.0, 0.9)
+txt("PS2 6V", 5.6, 49.5, 1.0, rot=90)
+txt("OUT", 5.6, 43.9, 0.9)
+txt("IN", 5.6, 55.1, 0.9)
+txt("+", PS2_INP[0], PS2_INP[1] + 1.95, 0.9)
+txt("PS3 6V", 44.4, 49.5, 1.0, rot=90)
+txt("OUT", 44.4, 43.9, 0.9)
+txt("IN", 44.4, 55.1, 0.9)
+txt("+", PS3_INP[0], PS3_INP[1] + 1.95, 0.9)
 txt("+", 41.5, 63.7, 1.0)
 txt("-", 45.0, 63.7, 1.0)
 txt("BAT", 43.25, 68.6, 1.0)
-txt("+", 16.4, 46.6, 0.9)
-txt("C1", 19.05, 48.4, 0.9)
+txt("+", 16.4, C1Y + 2.6, 0.9)
 txt("+", 6.9, 18.4, 0.9)
 txt("+", 46.6, 18.4, 0.9)
 txt("C2", CL_X, 9.9, 1.0)
 txt("C3", CR_X, 9.9, 1.0)
-txt("3V3", 14.6, 0.95, 0.9)
-txt("5V", 14.0, 49.9, 0.8)
-txt("ESP32 DevKitC 38P", 29.0, 47.6, 0.9)
-txt("ANTENNA ^", 25.0, 0.95, 0.8)
-txt("USB v", 25.0, 49.35, 0.8)
+txt("EN", 14.2, ry(0), 0.8, anchor="l")
+txt("VIN", 14.2, ry(14), 0.8, anchor="l")
+txt("3V3", 33.0, ry(14) + 1.5, 0.8, anchor="r")
+txt("25.4", XR, ry(0) - 3.4, 0.8, rot=90)
+txt("22.9", XR2, ry(0) - 3.4, 0.8, rot=90)
+txt("ESP32 30P", 21.0, 3.2, 0.9)
+txt("USB v", 30.0, 48.9, 0.8)
 # bottom silk: title + servo map
-txt("ROBOT DOG MAIN v1", 24.0, 4.5, 1.1, layer="B")
-txt("2026-11-16  50x70", 24.0, 6.4, 0.9, layer="B")
+txt("ROBOT DOG MAIN v2", 20.5, 4.0, 1.1, layer="B")
+txt("2026-11-16  50x70", 20.5, 6.0, 0.9, layer="B")
 rows = ["SERVO   GPIO", "LF A/B/G 25/26/27", "RF A/B/G 16/18/17", "LH A/B/G 13/12/14", "RH A/B/G 4/2/15",
         "IMU AD0=GND 0x68", "INA219 0x40", "I2C SDA21 SCL22"]
 for k, r in enumerate(rows):
-    txt(r, 23.6, 9.5 + k * 1.75, 0.9, layer="B")
-txt("BAT+ -> SWITCH -> J1+", 25.0, 27.6, 0.9, layer="B")
+    txt(r, 20.5, 9.5 + k * 1.75, 0.9, layer="B")
+txt("BAT+ > SW > J1+", 20.5, 26.6, 0.9, layer="B")
+txt("ESP32 30P: header in", 20.5, 28.6, 0.9, layer="B")
+txt("25.4 OR 22.9 row", 20.5, 30.3, 0.9, layer="B")
 
 
 # =================================================================== geometry
@@ -358,7 +395,7 @@ def thermal_pour(layer, extra_vias=()):
     items = layer_items(layer)
     other = unary_union([g.buffer(POUR_CLR, quad_segs=QS) for (net, g, k, o) in items if net != "GND"])
     keep = unary_union([Point(x, y).buffer(3.0, quad_segs=QS) for (x, y) in MH])
-    antenna = box(13.6, 0.0, 36.4, 1.6)
+    antenna = box(13.6, 0.0, 36.4, 2.5)
     base = board_outline(0.5).difference(other).difference(keep).difference(antenna)
     base = base.buffer(-0.15, quad_segs=QS).buffer(0.15, quad_segs=QS).intersection(board_outline(0.5)).difference(other)
     rings, spokes = [], []
