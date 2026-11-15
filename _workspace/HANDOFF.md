@@ -1,4 +1,4 @@
-# 로봇개 프로젝트 인수 문서 (2026-11-14 기준)
+# 로봇개 프로젝트 인수 문서 (2026-11-16 기준)
 
 다른 계정이나 새 세션에서 이어 갈 때 **이 문서를 가장 먼저 읽는다.** 자세한 경과는 맨 아래 "자세한 기록"의 파일에 있다.
 
@@ -21,6 +21,7 @@ ESP32 사족 로봇개(12개 서보, 다리당 3관절)를 웹 페이지 하나�
 | 3단계 보행 | 업로드됨, **바닥 실물 미시험** |
 | 테스트 | `python -m unittest discover tests` → 120개 통과 |
 | 컴파일 | HEAD 1,091,619 B (플래시 83%). 보드의 `4ced7eb`는 1,082,259 B |
+| **메인 보드 PCB (2026-11-16)** | `회로도.jpg`를 50×70 mm 2층 기판으로 설계: `hardware/pcb/` (생성 스크립트 `make_pcb.py`, 주문용 `out/robotdog_main_gerber.zip`, KiCad 8 파일, 미리보기 PNG, 설명 `README.md`). MPU9250 AD0→GND 배선 추가(0x68), 서보 전원별 1000 µF 추가. 스크립트 자체 간격·연결 검사 통과, Gerber 재해석 일치. **미확인: KiCad로 열어 보기, 모듈 실측(Mini360 패드 간격·INA219 핀 순서·38핀 DevKitC 여부), 제작·전원 시험.** 기판에서는 IMU 방향이 바뀌므로 축 설정·영점을 다시 잡아야 한다. 다시 만들 때 `pip install shapely matplotlib` 필요 |
 | 루프 작업 목록 | `_workspace/loop/BACKLOG.md` L1~L8 모두 완료 |
 | git | 브랜치 `main`, **원격 저장소 없음**. 다른 PC로 옮기려면 폴더째 복사하거나 원격을 추가한다 |
 
@@ -94,6 +95,7 @@ arduino-cli compile --fqbn esp32:esp32:esp32 --warnings default .
 | `esp32-robot-dog-code-master/software/usb_gateway/usb_gateway.py` | USB 게이트웨이 (루프백 전용, 직렬 ↔ 같은 JSON API) |
 | `esp32-robot-dog-code-master/software/usb_gateway/level_calibrate.py` | 수평 보정 스크립트 (기울기 측정 → 보정값 최소 조정 → `TRIM SAVE`) |
 | `esp32-robot-dog-code-master/software/usb_gateway/README.md` | **사용 설명서**: 경로별 사용법, 안전 규칙, 핫스팟, 수평 유지, 관절 모형, API |
+| `hardware/pcb/` | 메인 보드 PCB: `make_pcb.py`(연결·배치·배선·검사·출력 전부), `out/`(Gerber zip, `.kicad_pcb`, PNG), `README.md`(부품·실측 확인·조립 순서) |
 | `tests/` | `test_level_calibrate.py`(수평 보정), `test_usb_gateway.py`(가짜 펌웨어 + 펌웨어 소스 정적 검사), `page_harness.js` + `test_control_page.py`(Node로 페이지 실행), `test_walk_notebook_safety.py` |
 | `robot_dog_*.ipynb` | 사용자가 쓰는 노트북 (서보 조정, IMU 확인, 4방향 보행) |
 | `.claude/` | 하네스: 에이전트(embedded, telemetry, digital-twin, integration-qa), 스킬, 루프 안전 훅 |
