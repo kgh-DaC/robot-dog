@@ -97,8 +97,8 @@ def txt(s, x, y, h=1.0, rot=0, layer="F", anchor="c"):
 P = 2.54
 Y0 = 8.0                     # first ESP32 header pin (EN / D23); antenna end overhangs the top edge
 XL = 12.3                    # left header row
-XR = 37.7                    # right row for 25.4 mm (1.0") wide 30-pin boards (DOIT DevKit V1, ~28 mm wide)
-XR2 = XR - P                 # right row for 22.86 mm (0.9") narrow 30-pin clones; fit ONE female header
+XR = 37.7                    # right row: 25.4 mm (1.0") row spacing, measured by the user 2026-11-16
+XR2 = XR - P                 # routing waypoint just inside the right row (no holes here)
 NPIN = 15
 
 
@@ -135,11 +135,10 @@ def esp_net(side, i):
 
 
 # U1: ESP32 DevKit V1 30-pin on 1x15 female headers (right row has two hole columns)
-u1 = fp("U1", "ESP32-DevKit-30P", 25.0, ry(7), "ESP32 DevKit V1 30-pin, 1x15 female headers; right row 25.4 or 22.86 mm")
+u1 = fp("U1", "ESP32-DevKit-30P", 25.0, ry(7), "ESP32 DevKit V1 30-pin, 2x 1x15 female headers, rows 25.4mm apart")
 for i in range(NPIN):
     u1.pad(i + 1, XL, ry(i), esp_net("L", i), shape="rect" if i == 0 else "circle")
     u1.pad(16 + i, XR, ry(i), esp_net("R", i))
-    u1.pad(31 + i, XR2, ry(i), esp_net("R", i))
 for x in (XL, XR):
     u1.rect(x - 1.27, ry(0) - 1.27, x + 1.27, ry(NPIN - 1) + 1.27)
 u1.rect(11.0, ry(0) - 12.4, 39.0, ry(NPIN - 1) + 3.5, layer="fab")     # 28 x 51.5 board outline (raised)
@@ -252,10 +251,10 @@ for k, (x, y) in enumerate(MH):
     f.silk.append(("circle", (x, y, 3.0)))
 
 # ----------------------------------------------------------------- routing
-# both right hole columns carry the same signal
-for i in range(NPIN):
-    if esp_net("R", i):
-        trk("F", 0.4, [(XR2, ry(i)), (XR, ry(i))], esp_net("R", i))
+# short stubs from the right row to the routing start points (SCL, SDA, 3V3)
+for i in (1, 4, 14):
+    trk("F", 0.4, [(XR2, ry(i)), (XR, ry(i))], esp_net("R", i))
+trk("B", 0.5, [(XR2, ry(14)), (XR, ry(14))], "+3V3")
 # servo signals (straight, top)
 for (f, side, i, joint, gpio) in SERVO_FPS:
     xs = (LS if side == "L" else RS)["S"]
@@ -344,8 +343,6 @@ txt("C3", CR_X, 9.9, 1.0)
 txt("EN", 14.2, ry(0), 0.8, anchor="l")
 txt("VIN", 14.2, ry(14), 0.8, anchor="l")
 txt("3V3", 33.0, ry(14) + 1.5, 0.8, anchor="r")
-txt("25.4", XR, ry(0) - 3.4, 0.8, rot=90)
-txt("22.9", XR2, ry(0) - 3.4, 0.8, rot=90)
 txt("ESP32 30P", 21.0, 3.2, 0.9)
 txt("USB v", 30.0, 48.9, 0.8)
 # bottom silk: title + servo map
@@ -356,8 +353,7 @@ rows = ["SERVO   GPIO", "LF A/B/G 25/26/27", "RF A/B/G 16/18/17", "LH A/B/G 13/1
 for k, r in enumerate(rows):
     txt(r, 20.5, 9.5 + k * 1.75, 0.9, layer="B")
 txt("BAT+ > SW > J1+", 20.5, 26.6, 0.9, layer="B")
-txt("ESP32 30P: header in", 20.5, 28.6, 0.9, layer="B")
-txt("25.4 OR 22.9 row", 20.5, 30.3, 0.9, layer="B")
+txt("ESP32 30P rows 25.4mm", 20.5, 28.6, 0.9, layer="B")
 
 
 # =================================================================== geometry
