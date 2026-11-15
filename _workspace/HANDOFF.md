@@ -21,7 +21,7 @@ ESP32 사족 로봇개(12개 서보, 다리당 3관절)를 웹 페이지 하나�
 | 3단계 보행 | 업로드됨, **바닥 실물 미시험** |
 | 테스트 | `python -m unittest discover tests` → 120개 통과 |
 | 컴파일 | HEAD 1,091,619 B (플래시 83%). 보드의 `4ced7eb`는 1,082,259 B |
-| **메인 보드 PCB (2026-11-16)** | `회로도.jpg`를 50×70 mm 2층 기판으로 설계: `hardware/pcb/` (생성 스크립트 `make_pcb.py`, 주문용 `out/robotdog_main_gerber.zip`, KiCad 8 파일, 미리보기 PNG, 설명 `README.md`). MPU9250 AD0→GND 배선 추가(0x68), 서보 전원별 1000 µF 추가. 스크립트 자체 간격·연결 검사 통과, Gerber 재해석 일치. **미확인: KiCad로 열어 보기, 모듈 실측(Mini360 패드 간격·INA219 핀 순서·38핀 DevKitC 여부), 제작·전원 시험.** 기판에서는 IMU 방향이 바뀌므로 축 설정·영점을 다시 잡아야 한다. 다시 만들 때 `pip install shapely matplotlib` 필요 |
+| **메인 보드 PCB (2026-11-16)** | `회로도.jpg`를 50×70 mm 2층 기판으로 설계: `hardware/pcb/` (생성 스크립트 `make_pcb.py`, 주문용 `out/robotdog_main_gerber.zip`, KiCad 8 파일, 미리보기 PNG, 설명 `README.md`). MPU9250 AD0→GND 배선 추가(0x68), 서보 전원별 1000 µF 추가. **같은 날 v2: 사용자 확인으로 ESP32를 30핀 DevKit으로 변경**(오른쪽 핀 줄은 25.4/22.86 mm 두 줄 구멍, 보드에 맞는 줄에만 헤더), 서보 헤더마다 관절 표시(`A25` 등, A=ALPHA B=BETA G=GAMMA)와 다리 묶음 경계선 추가. 스크립트 자체 간격·연결 검사 통과, Gerber 재해석 일치. **미확인: KiCad로 열어 보기, 모듈 실측(Mini360 패드 간격·INA219 핀 순서·30핀 보드 줄 간격), 제작·전원 시험.** 기판에서는 IMU 방향이 바뀌므로 축 설정·영점을 다시 잡아야 한다. 다시 만들 때 `pip install shapely matplotlib` 필요 |
 | 루프 작업 목록 | `_workspace/loop/BACKLOG.md` L1~L8 모두 완료 |
 | git | 브랜치 `main`, **원격 저장소 없음**. 다른 PC로 옮기려면 폴더째 복사하거나 원격을 추가한다 |
 
