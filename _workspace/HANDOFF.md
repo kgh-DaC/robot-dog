@@ -102,6 +102,7 @@ arduino-cli compile --fqbn esp32:esp32:esp32 --warnings default .
 | `esp32-robot-dog-code-master/software/usb_gateway/level_calibrate.py` | 수평 보정 스크립트 (기울기 측정 → 보정값 최소 조정 → `TRIM SAVE`) |
 | `esp32-robot-dog-code-master/software/usb_gateway/README.md` | **사용 설명서**: 경로별 사용법, 안전 규칙, 핫스팟, 수평 유지, 관절 모형, API |
 | `hardware/pcb/` | 메인 보드 PCB: `make_pcb.py`(연결·배치·배선·검사·출력 전부), `out/`(Gerber zip, `.kicad_pcb`, PNG), `README.md`(부품·실측 확인·조립 순서) |
+| `hardware/pcb/robotdog_main_bom.xlsx` | 부품 구매 목록 (2026-11-16, 16줄). 노란 칸(보유 수량, 단가)을 넣으면 구매 수량·금액이 계산된다. 보유 수량의 1·3은 추정, 단가는 비어 있음. Excel에서 열어 계산 결과를 확인하지는 못했다(수식은 MAX·IF·SUM뿐) |
 | `tests/` | `test_level_calibrate.py`(수평 보정), `test_usb_gateway.py`(가짜 펌웨어 + 펌웨어 소스 정적 검사), `page_harness.js` + `test_control_page.py`(Node로 페이지 실행), `test_walk_notebook_safety.py` |
 | `robot_dog_*.ipynb` | 사용자가 쓰는 노트북 (서보 조정, IMU 확인, 4방향 보행) |
 | `.claude/` | 하네스: 에이전트(embedded, telemetry, digital-twin, integration-qa), 스킬, 루프 안전 훅 |
