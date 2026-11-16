@@ -126,8 +126,20 @@ class AutoWalkFirmwareSourceTests(unittest.TestCase):
 
     def test_off_by_default_and_only_after_a_power_on_reset(self):
         self.assertIn('store.getBool("on", false)', self.auto)
-        self.assertIn("autoWalkEnabled && esp_reset_reason() == ESP_RST_POWERON", self.auto)
+        self.assertIn("if (!autoWalkEnabled) return;", self.auto)
+        # Only a power-on boot, or a brownout boot with no unfinished run; never WDT/panic/software resets.
+        self.assertIn("if (reason == ESP_RST_POWERON || (reason == ESP_RST_BROWNOUT && !unfinished)) {", self.auto)
+        self.assertEqual(self.auto.count("ESP_RST_"), 3)
         self.assertEqual(self.auto.count("AUTOWALK_WAITING;"), 1)  # armed only in autoWalkSetup()
+
+    def test_brownout_during_a_run_blocks_the_next_brownout_boot(self):
+        update = self.auto[self.auto.index("void autoWalkUpdate()"):self.auto.index("const char *autoWalkSet(")]
+        # The unfinished mark is saved before arming, and no walk starts if saving fails.
+        self.assertLess(update.index("autoWalkStorePend(true)"), update.index("controlArm(CTRL_AUTO)"))
+        self.assertIn('autoWalkStorePend(true) ? NULL : "autowalk_store_failed"', update)
+        # It is cleared only after a normal stop (disarmed), never while the run is active.
+        self.assertIn("if (autoWalkPendSaved && !armed && autoWalkStorePend(false))", update)
+        self.assertIn('unfinished = store.getUChar("pend", 0) != 0;', self.auto)
 
     def test_run_is_bounded_and_ends_with_a_normal_stop(self):
         run = int(re.search(r"AUTOWALK_RUN_MS = (\d+);", self.auto).group(1))
