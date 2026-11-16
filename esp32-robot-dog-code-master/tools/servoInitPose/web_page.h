@@ -71,6 +71,9 @@ td small{color:var(--muted)}
 input{font:inherit;border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--ink);padding:10px;min-width:0}
 .row>input{flex:3 1 180px}
 .target{font-family:ui-monospace,Consolas,monospace;font-size:13px}
+[hidden]{display:none!important}
+#localUi{display:grid;gap:14px;min-width:0}
+#wifiFrame{width:100%;height:82vh;border:0;display:block;border-radius:8px;background:var(--bg)}
 </style>
 </head>
 <body>
@@ -84,8 +87,10 @@ input{font:inherit;border:1px solid var(--line);border-radius:10px;background:va
     <div class="lvhead">
       <h2>연결 방법</h2>
       <div class="seg">
+        <button id="cmSerial" hidden>USB 직렬 (브라우저)</button>
         <button id="cmUsb">USB 게이트웨이</button>
         <button id="cmHot">핫스팟 Wi-Fi</button>
+        <button id="cmOff" hidden>연결 끊기</button>
       </div>
     </div>
     <div class="row" id="hsAddrRow" hidden>
@@ -95,10 +100,19 @@ input{font:inherit;border:1px solid var(--line);border-radius:10px;background:va
     <div class="row" id="usbLinkRow" hidden style="margin-top:8px">
       <button id="usbLink">USB 연결 끊기</button>
     </div>
+    <div class="row" id="serialRow" hidden style="margin-top:8px">
+      <button id="serialPick">다른 USB 포트 고르기</button>
+    </div>
     <p class="note" style="margin-top:8px">현재 대상: <span id="connTarget" class="target">-</span></p>
     <p class="note" id="connNote"></p>
   </section>
 
+  <section class="card" id="frameCard" hidden>
+    <p class="note" style="margin-bottom:8px">아래는 로봇이 Wi-Fi로 직접 보낸 제어 페이지입니다. 아무것도 보이지 않으면 이 PC가 로봇 Wi-Fi(RobotDog-XXXX) 또는 로봇과 같은 핫스팟에 연결돼 있는지, 주소가 맞는지 확인하세요.</p>
+    <iframe id="wifiFrame" title="로봇 Wi-Fi 제어 페이지" src="about:blank"></iframe>
+  </section>
+
+  <div id="localUi">
   <div class="stage">
   <section class="card" id="modelCard">
     <div class="lvhead">
@@ -226,11 +240,11 @@ input{font:inherit;border:1px solid var(--line);border-radius:10px;background:va
       <button id="autoToggle" class="lvtoggle">자동 전진 켜기</button>
     </div>
     <div class="kv" style="margin:6px 0 10px">상태<b id="autoState">-</b></div>
-    <p class="note" id="autoNote">켜 두면 로봇 전원을 넣을 때마다 잠시 기다린 뒤 조종 없이 앞으로 걷고, 정해진 시간이 지나면 스스로 멈춰 중립 자세로 돌아갑니다. 설정은 로봇 보드에 저장됩니다(USB 게이트웨이에서만 바꿀 수 있음). 전원을 켤 때만 동작합니다(켜는 순간의 전원 흔들림으로 부팅된 경우 포함). 걷는 도중 전원이 흔들려 재부팅되면 다시 걷지 않으며, 이때는 자동 전진을 껐다 켜야 풀립니다. 감시 타이머·오류로 재부팅된 경우에도 걷지 않습니다. 기다리는 동안이나 걷는 동안 긴급 정지를 누르면 취소됩니다. 조종자가 없는 동작이므로 로봇 앞을 비우고 전원 스위치를 손 닿는 곳에 두세요.</p>
+    <p class="note" id="autoNote">켜 두면 로봇 전원을 넣을 때마다 잠시 기다린 뒤 조종 없이 앞으로 걷고, 정해진 시간이 지나면 스스로 멈춰 중립 자세로 돌아갑니다. 설정은 로봇 보드에 저장됩니다(USB 연결에서만 바꿀 수 있음). 전원을 켤 때만 동작합니다(켜는 순간의 전원 흔들림으로 부팅된 경우 포함). 걷는 도중 전원이 흔들려 재부팅되면 다시 걷지 않으며, 이때는 자동 전진을 껐다 켜야 풀립니다. 감시 타이머·오류로 재부팅된 경우에도 걷지 않습니다. 기다리는 동안이나 걷는 동안 긴급 정지를 누르면 취소됩니다. 조종자가 없는 동작이므로 로봇 앞을 비우고 전원 스위치를 손 닿는 곳에 두세요.</p>
   </section>
 
   <section class="card" id="wifiCard" hidden>
-    <div class="kv">ESP32 Wi-Fi 접속 정보 (USB 게이트웨이에서만 표시)<b id="wifiInfo" class="wifi">-</b></div>
+    <div class="kv">ESP32 Wi-Fi 접속 정보 (USB 연결에서만 표시)<b id="wifiInfo" class="wifi">-</b></div>
     <div id="hsSet" hidden style="margin-top:14px">
       <h2>핫스팟 설정</h2>
       <div class="kv" style="margin:6px 0 10px">핫스팟 상태<b id="hsState">-</b></div>
@@ -245,6 +259,8 @@ input{font:inherit;border:1px solid var(--line);border-radius:10px;background:va
       <p class="note" style="margin-top:8px">로봇이 휴대폰 핫스팟에 접속하게 합니다. 비밀번호는 USB로 로봇 보드에만 저장되고, 이 페이지와 상태 응답에는 나오지 않습니다. 로봇이 움직이는 중에는 바꿀 수 없습니다. ESP32는 2.4 GHz만 지원하므로 아이폰은 “호환성 최대화”를 켜세요. 접속되면 위 “연결 방법”에서 핫스팟 Wi-Fi를 고르세요. 로봇 자체 Wi-Fi(192.168.4.1)는 계속 켜져 있습니다.</p>
     </div>
   </section>
+
+  </div>
 
   <p class="note">안전: 로봇을 고정하거나 발을 띄운 상태에서 먼저 시험하고, 주변을 비우고, 전원 스위치를 손 닿는 곳에 두세요. 소프트웨어 정지에만 의존하지 마세요.</p>
 </main>
@@ -272,7 +288,15 @@ input{font:inherit;border:1px solid var(--line);border-radius:10px;background:va
     bad_host: "로봇이 이 주소로 온 요청을 거부했습니다. IP 주소나 robotdog.local을 쓰세요.",
     usb_released: "USB 연결을 끊어 둔 상태입니다. “USB 다시 연결”을 누르세요.",
     usb_connecting: "USB 연결을 시도하는 중입니다. 잠시 후 다시 누르세요.",
-    firmware_without_autowalk: "이 펌웨어는 자동 전진을 지원하지 않습니다. 펌웨어를 업데이트하세요."
+    firmware_without_autowalk: "이 펌웨어는 자동 전진을 지원하지 않습니다. 펌웨어를 업데이트하세요.",
+    not_connected: "연결되어 있지 않습니다. 위 “연결 방법”에서 먼저 연결하세요.",
+    serial_unsupported: "이 브라우저는 USB 직렬 연결을 지원하지 않습니다. PC의 Chrome 또는 Edge로 여세요.",
+    no_port_selected: "USB 포트를 고르지 않았습니다. “USB 직렬”을 다시 눌러 로봇의 포트를 고르세요.",
+    open_failed: "USB 포트를 열 수 없습니다. 다른 프로그램(게이트웨이·노트북·시리얼 모니터)이 쓰고 있지 않은지 확인하세요.",
+    no_ready_from_firmware: "보드가 응답하지 않습니다. USB를 다시 꽂거나 보드의 EN 버튼을 누른 뒤 다시 연결하세요.",
+    firmware_without_lease_support: "이 펌웨어는 웹 제어를 지원하지 않습니다. 펌웨어를 업데이트하세요.",
+    serial_error: "USB 직렬 연결이 끊겼습니다. “USB 직렬”을 다시 누르세요.",
+    no_response: "로봇이 응답하지 않습니다."
   };
   var STOP_KO = { tilt_limit: "기울기 한계 초과로 자동 정지", imu_lost: "센서 값 끊김으로 자동 정지",
     heartbeat_timeout: "하트비트 끊김으로 자동 정지", autowalk_done: "자동 전진 시간이 끝나 정지", level_diverge: "수평 보정이 반대로 작동해 자동 정지 (부호 확인 필요)" };
@@ -286,7 +310,15 @@ input{font:inherit;border:1px solid var(--line);border-radius:10px;background:va
   var onGateway = LOC.protocol === "http:" && /^(127\.\d+\.\d+\.\d+|localhost)(:\d+)?$/.test(LOC.host || "");
   var HOST_RE = /^[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$/;
   var CONN_KEY = "robotdog.conn";
-  var conn = { mode: onGateway ? "usb" : "hot", host: "" };   // host: hotspot target (gateway page only)
+  // A page opened from a file on this computer (file://) needs no gateway program:
+  // "serial" talks to the board through the browser's Web Serial API, and Wi-Fi
+  // shows the robot's own page in a frame (same origin there, so no CORS and no
+  // firmware change). It starts disconnected ("off") and connects only on a click.
+  var isFile = LOC.protocol === "file:";
+  var canSwitch = onGateway || isFile;
+  var framed = false;        // this page is shown inside the local page's Wi-Fi frame
+  try { framed = !!window.top && window.top !== window.self; } catch (e) { framed = true; }
+  var conn = { mode: onGateway ? "usb" : isFile ? "off" : "hot", host: "" };   // host: Wi-Fi target (local pages only)
   var apiBase = "";          // "" = same origin as the page (relative URLs)
   var connGen = 0, pollCtrl = null, addrEdited = false, lastStaIp = "", cmdBusy = 0;
   // The firmware allows cross-origin calls only from these gateway origins (web_control.ino).
@@ -300,14 +332,18 @@ input{font:inherit;border:1px solid var(--line);border-radius:10px;background:va
     return null;
   }
   function apiUrl(path) { return apiBase + path; }
+  function noPoll() { return conn.mode === "off" || (isFile && conn.mode === "hot"); }
   function targetText() {
+    if (conn.mode === "off") return "연결 안 함";
+    if (conn.mode === "serial") return "USB 직렬 포트 (브라우저가 직접 연결)";
+    if (isFile) return "http://" + conn.host + " (아래에 로봇 페이지 표시)";
     if (!onGateway) return (LOC.host || "이 페이지") + " (로봇에서 열린 페이지)";
     return conn.mode === "usb" ? "USB 게이트웨이 → " + (state && state.serialPort ? state.serialPort : "직렬 포트")
       : "http://" + conn.host + " (로봇에 직접)";
   }
   // Returns an error text, or "" when the switch was made.
   function setConn(mode, host) {
-    if (!onGateway) {   // a robot-served page never switches; it only explains how to use USB
+    if (!canSwitch) {   // a robot-served page never switches; it only explains how to use USB
       if (mode === "usb") return "USB 연결은 노트북에서 python usb_gateway.py 를 실행한 뒤 http://127.0.0.1:8787 을 여세요. 로봇에서 열린 이 페이지는 USB 게이트웨이에 접속할 수 없습니다.";
       return "";
     }
@@ -320,9 +356,9 @@ input{font:inherit;border:1px solid var(--line);border-radius:10px;background:va
     } else {
       host = conn.host;
     }
-    if (mode === conn.mode && (mode === "usb" || host === conn.host)) return "";
+    if (mode === conn.mode && (mode !== "hot" || host === conn.host)) return "";
     conn = { mode: mode, host: host };
-    apiBase = mode === "hot" ? "http://" + host + "/" : "";
+    apiBase = mode === "hot" && !isFile ? "http://" + host + "/" : "";
     connGen++;                        // replies from the old target are ignored
     if (pollCtrl) pollCtrl.abort();
     state = null; lastOk = 0;
@@ -330,8 +366,8 @@ input{font:inherit;border:1px solid var(--line);border-radius:10px;background:va
     return "";
   }
   (function () {
-    var saved = onGateway ? store(true) : null;
-    if (saved && saved.mode === "hot" && typeof saved.host === "string" && HOST_RE.test(saved.host)) {
+    var saved = canSwitch ? store(true) : null;
+    if (onGateway && saved && saved.mode === "hot" && typeof saved.host === "string" && HOST_RE.test(saved.host)) {
       conn = { mode: "hot", host: saved.host };
       apiBase = "http://" + saved.host + "/";
     } else if (saved && typeof saved.host === "string" && HOST_RE.test(saved.host)) {
@@ -339,10 +375,373 @@ input{font:inherit;border:1px solid var(--line);border-radius:10px;background:va
     }
   })();
 
+  // ---- direct USB serial link (Web Serial; Chrome/Edge on a computer) -----------
+  // Does in the page what usb_gateway.py does in Python, with the same replies:
+  // status() gives the same object as GET api/status, command() the same as
+  // POST api/command. The safety rules are the firmware's and stay the same:
+  // explicit ARM, 1 s heartbeat lease, STOP always accepted and written at once
+  // (not queued behind a status read), nothing re-arms after a reconnect, and
+  // the port is closed only after STOP and a settled (saved) pose.
+  // One difference from the gateway: a browser cannot open the port with DTR/RTS
+  // held low, so opening or closing it may reset the board. A walk that the
+  // firmware scheduled because of such a reset (AUTOWALK waiting) is cancelled
+  // on connect with STOP.
+  var serial = (function () {
+    var nav = (typeof navigator !== "undefined" && navigator) || {};
+    var api = nav.serial || null;
+    var PORT_NAME = "브라우저 직접 연결";
+    var DIRS = ["FORWARD", "BACKWARD", "LEFT", "RIGHT", "STOP"];
+    var port = null, reader = null, writer = null, encoder = null;
+    var lines = [], waiter = null, pending = "";
+    var chain = Promise.resolve();    // one request/reply operation at a time
+    var life = Promise.resolve();     // one open/close at a time
+    var caps = {}, owner = false, stopsPending = 0, lastError = "not_connected", opening = false, note = "";
+    var sensor = null, sensorAt = 0, wifi = null, wifiRead = false, wifiAt = 0;
+
+    function fail(code) { var e = new Error(code); e.code = code; return e; }
+    function sleep(ms) { return new Promise(function (resolve) { setTimeout(resolve, ms); }); }
+    function locked(fn) { var run = chain.then(fn, fn); chain = run.catch(function () {}); return run; }
+
+    // "NAME a=1 b=2" -> {a: "1", b: "2"}
+    function fields(line) {
+      var out = {};
+      line.split(" ").slice(1).forEach(function (item) {
+        var i = item.indexOf("=");
+        if (i > 0) out[item.slice(0, i)] = item.slice(i + 1);
+      });
+      return out;
+    }
+    function num(text) {   // the firmware writes "-" for unknown values
+      if (text === undefined || text === "-" || text === "") return null;
+      var v = Number(text);
+      return isFinite(v) ? v : null;
+    }
+    function legs(text) {
+      var v = (text || "").split("/").map(num);
+      return v.length === 4 ? { LF: v[0], RF: v[1], LH: v[2], RH: v[3] } : null;
+    }
+    function parseImu(line) {
+      var f = fields(line);
+      return { ready: f.ready === "1", chip: f.chip || "", whoAmI: f.who || "", address: f.addr || "", valid: f.valid === "1",
+        ageMs: parseInt(f.age === undefined ? "-1" : f.age, 10), accG: { x: num(f.ax), y: num(f.ay), z: num(f.az) },
+        axisDeg: { x: num(f.x), y: num(f.y) }, zeroed: f.zeroed === "1", rollMap: f.rollmap || "NONE", pitchMap: f.pitchmap || "NONE",
+        rollDeg: num(f.roll), pitchDeg: num(f.pitch) };
+    }
+    function parseLevel(line) {
+      var f = fields(line);
+      return { enabled: f.enabled === "1", active: f.active === "1", sensorUsable: f.sensor === "1",
+        rollCompDeg: num(f.rollcomp), pitchCompDeg: num(f.pitchcomp),
+        gammaOffsetDeg: legs(f.offsets) || { LF: null, RF: null, LH: null, RH: null },
+        maxCompDeg: num(f.max), tiltLimitDeg: num(f.limit) };
+    }
+    function parseTrim(line) {   // null = this firmware does not report it (unknown, not zero)
+      var t = legs(fields(line).trim);
+      return t && t.LF !== null && t.RF !== null && t.LH !== null && t.RH !== null ? t : null;
+    }
+    function parseAuto(line) {
+      var f = fields(line);
+      return { enabled: f.enabled === "1", phase: f.phase || "IDLE", delayMs: num(f.delay), runMs: num(f.run), blocked: f.blocked === "1" };
+    }
+    function parseWifi(line) {   // the hotspot name may hold spaces or "=": it is everything after " sta_ssid="
+      var cut = line.indexOf(" sta_ssid=");
+      var f = fields(cut < 0 ? line : line.slice(0, cut));
+      if (f.ssid === undefined) return null;
+      var w = { ssid: f.ssid, password: f.pass || "" };
+      if (f.sta !== undefined && cut >= 0) {
+        w.sta = { status: f.sta, ip: !f.sta_ip || f.sta_ip === "-" ? "" : f.sta_ip, ssid: line.slice(cut + 10), host: "robotdog.local" };
+      }
+      return w;
+    }
+    // Same limits as wifiStaSet() in the firmware, checked before the serial write.
+    function checkSta(ssid, pass) {
+      var i, c, bytes = 0;
+      if (typeof ssid !== "string" || !ssid) throw fail("invalid_ssid");
+      for (i = 0; i < ssid.length; i++) {
+        c = ssid.charCodeAt(i);
+        if (c < 0x20 || c === 0x7F) throw fail("invalid_ssid");
+        bytes += c < 0x80 ? 1 : c < 0x800 ? 2 : c >= 0xD800 && c <= 0xDFFF ? 2 : 3;   // UTF-8 length
+      }
+      if (bytes > 32) throw fail("invalid_ssid");
+      if (typeof pass !== "string" || (pass && (pass.length < 8 || pass.length > 63))) throw fail("invalid_password");
+      for (i = 0; i < pass.length; i++) {
+        c = pass.charCodeAt(i);
+        if (c < 0x20 || c > 0x7E) throw fail("invalid_password");
+      }
+    }
+
+    // ---- lines in, lines out ----
+    function pushLine(line) {
+      lines.push(line);
+      if (lines.length > 200) lines.shift();
+      if (waiter) { var w = waiter; waiter = null; w(); }
+    }
+    function nextLine(deadline) {   // a line, or null when the deadline passes or the port goes away
+      if (lines.length) return Promise.resolve(lines.shift());
+      var left = deadline - Date.now();
+      if (left <= 0 || !writer) return Promise.resolve(null);
+      return new Promise(function (resolve) {
+        var timer = setTimeout(function () { waiter = null; resolve(null); }, left);
+        waiter = function () { clearTimeout(timer); resolve(lines.length ? lines.shift() : null); };
+      });
+    }
+    function pump(p, r) {
+      var decoder = new TextDecoder();
+      function step() {
+        return r.read().then(function (res) {
+          if (res.done) return;
+          pending += decoder.decode(res.value, { stream: true });
+          var parts = pending.split("\n");
+          pending = parts.pop();
+          if (pending.length > 4096) pending = "";
+          parts.forEach(function (line) {
+            line = line.trim();
+            if (line && line.indexOf("EVENT ") !== 0) pushLine(line);
+          });
+          return step();
+        });
+      }
+      step().catch(function () {}).then(function () {
+        if (port === p) { lastError = "serial_error"; release(); }   // unplugged or read error
+      });
+    }
+    function write(text) {
+      var w = writer;
+      if (!w) return Promise.reject(fail("usb_disconnected"));
+      return w.write(encoder.encode(text + "\r\n")).catch(function () {
+        if (writer === w) { lastError = "serial_error"; release(); }
+        throw fail("usb_disconnected");
+      });
+    }
+    // Send one command and wait for its reply line. Stale input is dropped first so
+    // an earlier late reply is not taken as this one. Call only inside locked().
+    async function exchange(command, expect, exact, timeoutMs) {
+      lines.length = 0;
+      await write(command);
+      var deadline = Date.now() + (timeoutMs || 2000);
+      for (;;) {
+        var line = await nextLine(deadline);
+        if (line === null) {
+          if (!writer) throw fail("usb_disconnected");
+          if (Date.now() >= deadline) throw fail("no_response");
+          continue;
+        }
+        if (line.indexOf("ERR") === 0) throw fail(line.indexOf(" ") > 0 ? line.slice(line.indexOf(" ") + 1).trim() : line);
+        if (exact ? line === expect : line.indexOf(expect) === 0) return line;
+      }
+    }
+    async function release() {
+      var p = port, r = reader, w = writer;
+      port = reader = writer = null;
+      owner = false; sensor = null; wifi = null; wifiRead = false;
+      lines.length = 0; pending = "";
+      if (waiter) { var wake = waiter; waiter = null; wake(); }
+      try { if (r) await r.cancel(); } catch (e) { /* already closed */ }
+      try { if (r) r.releaseLock(); } catch (e) { /* already released */ }
+      try { if (w) w.releaseLock(); } catch (e) { /* already released */ }
+      try { if (p) await p.close(); } catch (e) { /* already closed or unplugged */ }
+    }
+
+    async function handshake() {
+      var deadline = Date.now() + 8000, ready = false, line;
+      while (!ready) {
+        if (Date.now() >= deadline) throw fail("no_ready_from_firmware");
+        lines.length = 0;
+        await write("HELLO");
+        var until = Math.min(deadline, Date.now() + 1000);
+        while ((line = await nextLine(until)) !== null) {
+          if (line === "READY SERVO_POSE_V1") { ready = true; break; }
+        }
+        if (!writer) throw fail("usb_disconnected");
+      }
+      var list = (await exchange("CAPS", "CAPS ", false)).split(" ");
+      if (list.indexOf("WALK4") < 0 || list.indexOf("LEASE1") < 0) throw fail("firmware_without_lease_support");
+      caps = {};
+      list.forEach(function (name) { caps[name] = true; });
+      if (caps.AUTOWALK1 && parseAuto(await exchange("AUTOWALK", "AUTOWALK ")).phase === "WAITING") {
+        // The board has just booted (possibly reset by opening the port) and is
+        // about to walk by itself. A person is connecting: cancel that run.
+        await exchange("WALK STOP", "OK WALK STOPPED", true);
+        note = "연결할 때 보드가 막 켜진 상태여서, 예약돼 있던 자동 전진을 취소했습니다. 움직이려면 활성화하세요.";
+      }
+    }
+    async function doOpen(pick) {
+      if (port && !pick) return;
+      if (port) await doClose();
+      note = "";
+      if (!api) { lastError = "serial_unsupported"; return; }
+      opening = true; lastError = "usb_connecting";
+      try {
+        var known = pick ? [] : await api.getPorts();   // ports this page was allowed to use before
+        var p;
+        try {
+          p = known.length === 1 ? known[0] : await api.requestPort();
+        } catch (e) { throw fail("no_port_selected"); }
+        try {
+          await p.open({ baudRate: 115200 });
+        } catch (e) { throw fail("open_failed"); }
+        port = p;
+        if (!encoder) encoder = new TextEncoder();
+        writer = p.writable.getWriter();
+        reader = p.readable.getReader();
+        pump(p, reader);
+        await locked(handshake);
+        lastError = "";
+      } catch (e) {
+        var code = e && e.code ? e.code : "open_failed";
+        await release();
+        lastError = code;
+      }
+      opening = false;
+    }
+    // STOP, wait for a settled (saved) pose, close. true/false = settled or not; null = nothing was open.
+    async function doClose() {
+      if (!port) { if (!opening) lastError = "not_connected"; return null; }
+      var settled = false;
+      try {
+        await write("WALK STOP");
+        await locked(async function () {
+          await exchange("WALK STOP", "OK WALK STOPPED", true);
+          var deadline = Date.now() + 6000;
+          while (Date.now() < deadline) {
+            if ((await exchange("SETTLED", "SETTLED ", false)) === "SETTLED 1") { settled = true; break; }
+            await sleep(200);
+          }
+        });
+      } catch (e) { /* closing anyway */ }
+      await release();
+      lastError = "not_connected";
+      return settled;
+    }
+
+    function offline(code) {
+      return { link: "usb", direct: true, connected: !!port, serialPort: PORT_NAME, error: code };
+    }
+    function status() {
+      if (!port || opening) return Promise.resolve(offline(opening ? "usb_connecting" : lastError || "usb_disconnected"));
+      return locked(async function () {
+        var st = fields(await exchange("STATE", "STATE ", false));
+        var angles = {};
+        (await exchange("STATUS", "STATUS ", false)).split(" ").slice(1).forEach(function (item) {
+          var i = item.indexOf("=");
+          if (i <= 0) return;
+          angles[item.slice(0, i)] = item.slice(i + 1).split("/").map(function (v) {
+            if (!/^-?\d+$/.test(v)) throw fail("bad_status_reply");
+            return parseInt(v, 10);
+          });
+        });
+        var now = Date.now();
+        if (!sensor || now - sensorAt >= 500) {      // IMU/LEVEL/AUTOWALK lines: at most twice a second
+          var s = { imu: null, level: null, trim: null, auto: null };
+          if (caps.IMU1) s.imu = parseImu(await exchange("IMU", "IMU ", false));
+          if (caps.LEVEL1) {
+            var levelLine = await exchange("LEVEL", "LEVEL ", false);
+            s.level = parseLevel(levelLine);
+            s.trim = parseTrim(levelLine);
+          }
+          if (caps.AUTOWALK1) s.auto = parseAuto(await exchange("AUTOWALK", "AUTOWALK ", false));
+          sensor = s; sensorAt = now;
+        }
+        if (caps.WIFI1 && (!wifiRead || (caps.STA1 && now - wifiAt >= 2000))) {
+          wifi = parseWifi(await exchange("WIFI", "WIFI ", false));
+          wifiRead = true; wifiAt = now;
+        }
+        var armed = st.armed === "1";
+        if (!armed || st.ctrl !== "SERIAL") owner = false;   // lease expired or stopped elsewhere
+        var reply = { link: "usb", direct: true, connected: true, serialPort: PORT_NAME, armed: armed,
+          controller: st.ctrl || "NONE", youControl: armed && st.ctrl === "SERIAL" && owner, walk: st.walk || "STOPPED",
+          homing: st.homing === "1", settled: st.settled === "1", resetReason: st.reset || "", lastStop: st.stop || "",
+          uptimeMs: parseInt(st.uptime || "0", 10) || 0, leaseTimeoutMs: 1000, angles: angles, wifi: wifi,
+          imu: sensor.imu, level: sensor.level };
+        if (sensor.trim) reply.standTrimDeg = sensor.trim;
+        if (sensor.auto) reply.autoWalk = sensor.auto;
+        return reply;
+      }).catch(function (e) { return offline(e && e.code ? e.code : "bad_status_reply"); });
+    }
+
+    async function run(p) {
+      var cmd = p.cmd;
+      if (cmd === "STOP") {
+        // Written at once, then repeated under the lock for a confirmed reply (STOP
+        // is idempotent). While a STOP is pending, ARM/HB/WALK are refused.
+        stopsPending++;
+        try {
+          await write("WALK STOP");
+          await locked(async function () {
+            await exchange("WALK STOP", "OK WALK STOPPED", true);
+            owner = false;
+          });
+        } finally { stopsPending--; }
+        return;
+      }
+      if (!port || opening) throw fail(opening ? "usb_connecting" : "usb_disconnected");
+      var queuedAt = Date.now();
+      await locked(async function () {
+        var mode;
+        if (stopsPending) throw fail("stop_in_progress");
+        // A command that waited this long behind a hung exchange is out of date:
+        // a late heartbeat or ARM must not act on a decision made a second ago.
+        if (Date.now() - queuedAt > 1000) throw fail("no_response");
+        if (cmd === "ARM") {
+          if ((await exchange("STATE", "STATE ", false)).split(" ").indexOf("armed=1") < 0) owner = false;
+          await exchange("ARM", "OK ARM", true);
+          owner = true;
+        } else if (cmd === "LEVEL") {
+          if (p.on !== "1" && p.on !== "0") throw fail("invalid_level");
+          if (p.on === "1" && !owner) throw fail("not_armed");   // only the armed page may switch leveling on
+          mode = p.on === "1" ? "ON" : "OFF";
+          await exchange("LEVEL " + mode, "OK LEVEL " + mode, true);
+          sensor = null;
+        } else if (cmd === "WIFI_SET" || cmd === "WIFI_CLEAR") {
+          // Refused while armed (the firmware refuses too). The password goes only to the serial port.
+          if (!caps.STA1) throw fail("firmware_without_hotspot");
+          if (cmd === "WIFI_SET") checkSta(p.ssid, p.pass);
+          if ((await exchange("STATE", "STATE ", false)).split(" ").indexOf("armed=1") >= 0) throw fail("armed");
+          if (cmd === "WIFI_SET") await exchange("WIFI_SET " + p.ssid + "\t" + p.pass, "OK WIFI_SET", true, 4000);
+          else await exchange("WIFI_CLEAR", "OK WIFI_CLEAR", true, 4000);
+          wifiRead = false;
+        } else if (cmd === "AUTOWALK") {
+          if (!caps.AUTOWALK1) throw fail("firmware_without_autowalk");
+          if (p.on !== "1" && p.on !== "0") throw fail("invalid_autowalk");
+          mode = p.on === "1" ? "ON" : "OFF";
+          await exchange("AUTOWALK " + mode, "OK AUTOWALK " + mode, true, 4000);
+          sensor = null;
+        } else if (!owner) {
+          throw fail("not_armed");
+        } else if (cmd === "HB") {
+          await exchange("HB", "OK HB", true);
+        } else if (cmd === "DISARM") {
+          await exchange("DISARM", "OK DISARM", true);
+          owner = false;
+        } else if (cmd === "WALK") {
+          if (DIRS.indexOf(p.dir) < 0) throw fail("invalid_direction");
+          await exchange("WALKHB " + p.dir, "OK WALKHB " + p.dir, true);
+        } else {
+          throw fail("unknown_command");
+        }
+      });
+    }
+
+    return {
+      supported: !!api,
+      isOpen: function () { return !!port || opening; },
+      error: function () { return lastError; },
+      note: function () { return note; },
+      open: function (pick) { var go = function () { return doOpen(pick); }; life = life.then(go, go); return life; },
+      close: function () { life = life.then(doClose, doClose); return life; },
+      status: status,
+      command: function (params) {
+        return run(params).then(function () { return { ok: true }; },
+          function (e) { return { ok: false, error: e && e.code ? e.code : "serial_error" }; });
+      }
+    };
+  })();
+
   function setMsg(text, isErr) { $("msg").textContent = text || ""; $("msg").className = "msg" + (isErr ? " err" : ""); }
 
   function post(params, keepalive) {
     params.session = session;
+    if (conn.mode === "serial") return serial.command(params);
+    if (noPoll()) return Promise.resolve({ ok: false, error: "not_connected" });
     return fetch(apiUrl("api/command"), {
       method: "POST", keepalive: !!keepalive, cache: "no-store",
       headers: { "Content-Type": "application/x-www-form-urlencoded", "X-Robot-Control": "1" },
@@ -381,9 +780,11 @@ input{font:inherit;border:1px solid var(--line);border-radius:10px;background:va
   function render() {
     var fresh = isFresh(1500);
     $("link").className = "badge " + (fresh ? "ok" : "bad");
-    $("linkText").textContent = !state ? (pollFails > 2 ? "응답 없음 (주소·연결 확인)" : "연결 확인 중") :
-      (state.link === "usb" ? "USB 게이트웨이" : "ESP32 Wi-Fi") +
+    $("linkText").textContent = conn.mode === "off" ? "연결 안 함" : noPoll() ? "Wi-Fi (아래 로봇 페이지)" :
+      !state ? (pollFails > 2 ? "응답 없음 (주소·연결 확인)" : "연결 확인 중") :
+      (state.direct ? "USB 직렬" : state.link === "usb" ? "USB 게이트웨이" : "ESP32 Wi-Fi") +
       (fresh ? " 연결됨" : state.released ? " 연결 끊음 (포트를 놓은 상태)" :
+        state.error === "usb_connecting" ? " 연결 중" :
         state.connected && state.error ? " 응답 없음 (" + state.error + ")" : " 연결 끊김");
     var mine = fresh && state.armed && state.youControl;
     $("arm").disabled = !fresh || state.armed || state.homing;
@@ -421,18 +822,25 @@ input{font:inherit;border:1px solid var(--line);border-radius:10px;background:va
   // One status request at a time; a hung request is aborted after 1.5 s.
   // (Without AbortController a hung request cannot be cancelled, so no guard.)
   // A reply that arrives after the connection mode changed is dropped.
-  var pollBusy = false, pollFails = 0;
+  var pollBusy = false, pollFails = 0, directErr = "";
   function poll() {
+    if (noPoll()) { state = null; render(); return Promise.resolve(); }
     var ctrl = window.AbortController ? new AbortController() : null;
     if (ctrl && pollBusy) return Promise.resolve();
     pollBusy = !!ctrl;
     pollCtrl = ctrl;
     var gen = connGen;
     var timer = ctrl ? setTimeout(function () { ctrl.abort(); }, 1500) : null;
-    return fetch(apiUrl("api/status?session=" + session), { cache: "no-store", signal: ctrl ? ctrl.signal : undefined })
-      .then(function (r) { return r.json(); })
+    var request = conn.mode === "serial" ? serial.status()
+      : fetch(apiUrl("api/status?session=" + session), { cache: "no-store", signal: ctrl ? ctrl.signal : undefined })
+        .then(function (r) { return r.json(); });
+    return request
       .then(function (s) {
         if (gen !== connGen) return;
+        if (s && s.direct) {     // direct serial: say once that the cable or port was lost
+          if (s.error === "serial_error" && directErr !== "serial_error") setMsg(ERR_KO.serial_error, true);
+          directErr = s.error || "";
+        }
         state = s; pollFails = 0;
         if (validState(s)) { lastOk = Date.now(); recordLevel(s); recordCompare(s, lastOk); }
       })
@@ -447,12 +855,34 @@ input{font:inherit;border:1px solid var(--line);border-radius:10px;background:va
     var usbFresh = fresh && state.link === "usb";
     var sta = state && state.wifi && state.wifi.sta;
     if (usbFresh && sta && sta.status === "CONNECTED" && sta.ip) lastStaIp = sta.ip;
+    $("connCard").hidden = framed;      // inside the local page's frame the outer page has this card
+    $("cmSerial").hidden = $("cmOff").hidden = !isFile;
+    $("cmUsb").hidden = isFile;
+    $("cmSerial").disabled = !serial.supported;
+    $("cmSerial").classList.toggle("on", conn.mode === "serial");
+    $("cmOff").classList.toggle("on", conn.mode === "off");
+    if (isFile) $("cmHot").textContent = "Wi-Fi";
+    $("serialRow").hidden = !(isFile && conn.mode === "serial");
+    $("serialPick").disabled = cmdBusy > 0;
+    var frameHost = isFile && conn.mode === "hot" ? conn.host : "";
+    $("frameCard").hidden = !frameHost;
+    $("localUi").hidden = !!frameHost;
+    if (frameHost !== shownFrame) {     // leaving: the framed page stops the robot on its own pagehide
+      shownFrame = frameHost;
+      $("wifiFrame").src = frameHost ? "http://" + frameHost + "/" : "about:blank";
+    }
     $("cmUsb").classList.toggle("on", onGateway && conn.mode === "usb");
-    $("cmHot").classList.toggle("on", !onGateway || conn.mode === "hot");
-    $("hsAddrRow").hidden = !onGateway;
-    if (onGateway && !addrEdited) $("hsAddr").value = conn.mode === "hot" ? conn.host : lastStaIp || conn.host || "robotdog.local";
+    $("cmHot").classList.toggle("on", !canSwitch || conn.mode === "hot");
+    $("hsAddrRow").hidden = !canSwitch;
+    if (canSwitch && !addrEdited) $("hsAddr").value = conn.mode === "hot" ? conn.host : lastStaIp || conn.host || (isFile ? "192.168.4.1" : "robotdog.local");
     $("connTarget").textContent = targetText();
-    $("connNote").textContent = !onGateway
+    $("connNote").textContent = isFile
+      ? (conn.mode === "serial" ? "브라우저가 USB 직렬 포트를 직접 엽니다 (게이트웨이 프로그램 불필요). 포트는 한 프로그램만 쓸 수 있으니 게이트웨이·노트북·시리얼 모니터는 닫으세요. 다른 연결로 바꾸거나 “연결 끊기”를 누르면 로봇을 정지시킨 뒤 포트를 닫습니다." +
+          (lastStaIp ? " 로봇이 핫스팟에 연결되어 있습니다 (" + lastStaIp + ")." : "")
+        : conn.mode === "hot" ? "로봇이 Wi-Fi로 보낸 페이지를 아래에 그대로 보여 줍니다. 조종과 긴급 정지는 아래 페이지에서 합니다."
+        : (serial.supported ? "USB 직렬 또는 Wi-Fi를 고르세요. Wi-Fi는 주소(로봇 자체 Wi-Fi는 192.168.4.1)를 확인하고 누릅니다."
+          : "이 브라우저는 USB 직렬 연결을 지원하지 않습니다 (PC의 Chrome·Edge 필요). Wi-Fi 연결은 쓸 수 있습니다."))
+      : !onGateway
       ? "이 페이지는 로봇이 직접 보냈습니다 (로봇 Wi-Fi 또는 핫스팟). USB로 쓰려면 노트북에서 http://127.0.0.1:8787 을 여세요."
       : conn.mode === "usb" ? "노트북의 USB 게이트웨이를 거쳐 로봇과 통신합니다." +
         (lastStaIp ? " 로봇이 핫스팟에 연결되어 있습니다 (" + lastStaIp + ")." : "")
@@ -483,12 +913,39 @@ input{font:inherit;border:1px solid var(--line);border-radius:10px;background:va
       $("hsSave").disabled = $("hsClear").disabled = state.armed;
     }
   }
-  function switchConn(mode, host) {
+  var shownFrame = "";
+  function openSerial(pick) {
+    setMsg("USB 직렬 포트에 연결하는 중입니다. 포트 선택 창이 뜨면 로봇의 포트(CP210x 등)를 고르세요.");
+    serial.open(pick).then(function () {
+      if (conn.mode !== "serial") return;
+      var e = serial.error();
+      setMsg(e ? (ERR_KO[e] || "USB 직렬 연결 실패: " + e) : serial.note() || "USB 직렬로 연결했습니다. 움직이려면 활성화하세요.", !!e);
+      poll();
+    });
+  }
+  function switchConn(mode, host, pick) {
+    var was = conn.mode;
     var err = setConn(mode, host);
-    if (err) setMsg(err, true);
-    else { setMsg(""); addrEdited = false; poll(); }
+    if (err) { setMsg(err, true); render(); return; }
+    setMsg(""); addrEdited = false;
+    if (was === "serial" && mode !== "serial") {
+      // STOP, wait for the settled (saved) pose, then close the port.
+      serial.close().then(function (settled) {
+        if (conn.mode === "serial" || settled === null) return;
+        setMsg(settled ? "로봇을 정지시키고 USB 직렬 포트를 닫았습니다." : "USB 직렬 포트를 닫았습니다. (정지 자세 저장은 확인하지 못했습니다)", !settled);
+      });
+    }
+    if (mode === "serial" && (pick || !serial.isOpen())) openSerial(pick);
+    poll();
     render();
   }
+  $("cmSerial").onclick = function () { switchConn("serial"); };
+  $("cmOff").onclick = function () { switchConn("off"); };
+  $("serialPick").onclick = function () {
+    if (isFresh(3000) && state.armed && state.youControl) { setMsg("움직임이 활성화된 동안에는 포트를 바꿀 수 없습니다. 먼저 정지하세요.", true); return; }
+    if (cmdBusy) return;
+    switchConn("serial", "", true);
+  };
   $("cmUsb").onclick = function () { switchConn("usb"); };
   $("cmHot").onclick = function () { switchConn("hot", $("hsAddr").value); };
   $("hsGo").onclick = function () { switchConn("hot", $("hsAddr").value); };

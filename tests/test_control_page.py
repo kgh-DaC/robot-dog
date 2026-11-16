@@ -374,6 +374,125 @@ class ConnectionModeTests(unittest.TestCase):
         self.assertEqual(v["link"], "ESP32 Wi-Fi 연결됨")
 
 
+@unittest.skipUnless(NODE, "node is not installed")
+class DirectSerialTests(unittest.TestCase):
+    """Page opened from disk (file://): Web Serial link and the Wi-Fi frame, no gateway program.
+
+    The harness gives the page a fake Web Serial port with a fake firmware behind it."""
+
+    @classmethod
+    def setUpClass(cls):
+        def run(mode):
+            out = subprocess.run([NODE, str(HARNESS), str(PAGE), mode], capture_output=True, text=True,
+                                 encoding="utf-8", timeout=60, check=True)
+            return json.loads(out.stdout)
+        cls.f = run("file")
+        cls.noserial = run("file-noserial")
+        cls.framed = run("framed")
+
+    def test_starts_disconnected_and_opens_nothing_by_itself(self):
+        v = self.f["initial"]
+        self.assertEqual((v["link"], v["target"]), ("연결 안 함", "연결 안 함"))
+        self.assertEqual((v["opens"], v["opened"], v["fetches"]), (0, False, 0))
+        self.assertEqual((v["serialHidden"], v["offHidden"], v["usbHidden"]), (False, False, True))
+        self.assertEqual(v["addr"], "192.168.4.1")           # the robot's own Wi-Fi is the default address
+        self.assertTrue(v["arm"])
+        self.assertIn("연결되어 있지 않습니다", self.f["armWhileOff"]["msg"])
+        self.assertEqual(self.f["armWhileOff"]["written"], 0)
+
+    def test_connect_handshakes_and_never_arms(self):
+        v = self.f["connected"]
+        self.assertEqual(v["link"], "USB 직렬 연결됨")
+        self.assertEqual(v["log"][:3], ["HELLO", "CAPS", "AUTOWALK"])
+        self.assertFalse(v["fwArmed"])
+        self.assertEqual(v["armed"], "비활성")
+        self.assertIn("<td>86</td>", v["joints"])            # joint table comes from the STATUS line
+        self.assertEqual((v["autoCardHidden"], v["wifiCardHidden"], v["hsSetHidden"]), (False, False, False))
+        self.assertEqual(v["fetches"], 0)                    # no HTTP at all on this path
+
+    def test_pending_auto_walk_is_cancelled_on_connect(self):
+        v = self.f["connected"]
+        self.assertEqual((v["autoPhase"], v["stops"]), ("IDLE", 1))
+        self.assertIn("자동 전진을 취소", v["msg"])
+
+    def test_heartbeats_keep_the_lease_while_walking(self):
+        v = self.f["walking"]
+        self.assertEqual((v["fwArmed"], v["fwWalk"]), (True, "FORWARD"))    # 3 s walk with a 1 s lease
+        self.assertGreaterEqual(v["hb"], 8)
+        self.assertEqual((v["armed"], v["walk"]), ("활성 (이 페이지)", "앞으로"))
+
+    def test_leaving_is_refused_while_this_page_controls(self):
+        v = self.f["refusedArmed"]
+        self.assertIn("활성화된 동안", v["msg"])
+        self.assertTrue(v["opened"])
+        self.assertTrue(v["fwArmed"])
+
+    def test_stop_is_written_at_once_and_confirmed(self):
+        v = self.f["stopped"]
+        self.assertFalse(v["fwArmed"])
+        self.assertEqual(v["stops"], 2)                      # immediate write + confirmed exchange
+        self.assertEqual(v["armed"], "비활성")
+
+    def test_no_heartbeat_when_the_firmware_stops_answering(self):
+        self.assertTrue(self.f["rearmed"])
+        v = self.f["silent"]
+        self.assertEqual(v["hbAfterStale"], 0)
+        self.assertEqual((v["armed"], v["fwd"], v["arm"]), ("알 수 없음", True, True))
+        self.assertIn("응답 없음", v["link"])
+        after = self.f["afterSilent"]                        # the lease ran out: stopped, and nothing re-arms
+        self.assertFalse(after["fwArmed"])
+        self.assertEqual(after["armed"], "비활성")
+
+    def test_switch_to_wifi_stops_settles_closes_and_shows_the_robot_page(self):
+        v = self.f["wifi"]
+        self.assertEqual(v["tail"], ["WALK STOP", "WALK STOP", "SETTLED"])
+        self.assertEqual((v["opened"], v["closes"]), (False, 1))
+        self.assertEqual(v["frame"], "http://172.20.10.3/")  # the hotspot address learned over USB
+        self.assertEqual((v["frameCardHidden"], v["localUiHidden"]), (False, True))
+        self.assertEqual(v["fetches"], 0)                    # the local page itself sends nothing over Wi-Fi
+        self.assertIn("포트를 닫았습니다", v["msg"])
+
+    def test_disconnect_clears_the_frame_and_sends_nothing(self):
+        v = self.f["off"]
+        self.assertEqual((v["frame"], v["frameCardHidden"], v["localUiHidden"]), ("about:blank", True, False))
+        self.assertEqual((v["link"], v["written"], v["opened"]), ("연결 안 함", 0, False))
+
+    def test_reconnect_reuses_the_allowed_port_and_does_not_arm(self):
+        v = self.f["reconnected"]
+        self.assertEqual((v["requests"], v["opens"]), (1, 2))
+        self.assertEqual(v["link"], "USB 직렬 연결됨")
+        self.assertFalse(v["fwArmed"])
+        self.assertEqual(v["armed"], "비활성")
+
+    def test_unplug_and_busy_port_are_reported(self):
+        v = self.f["unplugged"]
+        self.assertIn("연결이 끊겼습니다", v["msg"])
+        self.assertEqual((v["armed"], v["fwd"], v["arm"]), ("알 수 없음", True, True))
+        self.assertIn("열 수 없습니다", self.f["busy"]["msg"])
+        self.assertFalse(self.f["busy"]["opened"])
+
+    def test_browser_without_web_serial_still_offers_wifi(self):
+        v = self.noserial
+        self.assertTrue(v["serialDisabled"])
+        self.assertIn("Chrome", v["note"])
+        self.assertIn("지원하지 않습니다", v["msg"])
+        self.assertEqual(v["frame"], "http://192.168.4.1/")
+
+    def test_robot_page_inside_the_frame_hides_its_own_connection_card(self):
+        self.assertTrue(self.framed["connCardHidden"])
+        self.assertEqual(self.framed["armed"], "활성 (이 페이지)")
+
+    def test_serial_code_keeps_the_gateway_safety_rules(self):
+        page = PAGE.read_text(encoding="utf-8")
+        link = page[page.index("var serial = (function () {"):page.index("function setMsg(")]
+        self.assertNotIn("setSignals", link)                 # never drives DTR/RTS (no deliberate reset)
+        self.assertNotIn("fetch(", link)
+        stop = link[link.index('if (cmd === "STOP") {'):link.index("if (!port || opening) throw")]
+        self.assertLess(stop.index('await write("WALK STOP");'), stop.index("await locked("))
+        self.assertIn('if (stopsPending) throw fail("stop_in_progress");', link)
+        self.assertEqual(link.count('exchange("ARM", "OK ARM", true)'), 1)   # only on the ARM command
+
+
 class EmbeddedPageTests(unittest.TestCase):
     def test_firmware_header_matches_page(self):
         import sys

@@ -1,9 +1,12 @@
 // Runs the control page script (robot_control_web/index.html) in a fake
 // browser: fake DOM, fake clock/timers and a scripted fetch. Prints a JSON
 // report for tests/test_control_page.py.
-// Usage: node page_harness.js <index.html> [gateway]
+// Usage: node page_harness.js <index.html> [gateway|file|file-noserial|framed]
 //   default: page served by the robot; "gateway": page served by the USB
-//   gateway (http://127.0.0.1:8787), connection mode switching.
+//   gateway (http://127.0.0.1:8787), connection mode switching; "file": page
+//   opened from disk (file://) with a fake Web Serial port and fake firmware;
+//   "file-noserial": the same in a browser without Web Serial; "framed": the
+//   robot's page shown inside the local page's Wi-Fi frame.
 "use strict";
 const fs = require("fs");
 const vm = require("vm");
@@ -125,6 +128,76 @@ if (MODE === "gateway") {
   context.window.localStorage = { getItem: (k) => (k in ls ? ls[k] : null), setItem: (k, v) => { ls[k] = String(v); } };
   context.__ls = ls;
 }
+// ---- page opened from disk: fake firmware behind a fake Web Serial port -------
+const fw = { armed: false, ctrl: "NONE", walk: "STOPPED", lease: 0, stop: "boot", autoPhase: "IDLE", silent: false,
+  log: [], openCount: 0, closeCount: 0, requestCount: 0, granted: false, opened: false, busy: false };
+function fwHandle(line) {
+  const expire = () => { if (fw.armed && now > fw.lease) { fw.armed = false; fw.ctrl = "NONE"; fw.walk = "STOPPED"; fw.stop = "heartbeat_timeout"; } };
+  expire();
+  const parts = line.split(" ");
+  switch (parts[0]) {
+    case "HELLO": return ["READY SERVO_POSE_V1"];
+    case "CAPS": return ["CAPS SERVO_POSE_V1 WALK4 LEASE1 WIFI1 IMU1 LEVEL1 STA1 TRIM1 AUTOWALK1"];
+    case "STATE": return ["EVENT NOISE", `STATE armed=${fw.armed ? 1 : 0} ctrl=${fw.ctrl} walk=${fw.walk} homing=0 settled=1 reset=BROWNOUT stop=${fw.stop} uptime=${now}`];
+    case "STATUS": return ["STATUS LF=90/45/90 RF=90/45/90 LH=90/45/90 RH=86/45/90"];
+    case "IMU": return ["IMU ready=1 chip=MPU_COMPATIBLE who=0x75 addr=0x68 valid=1 age=5 ax=0.00 ay=0.00 az=1.00 x=1.50 y=-0.50 zeroed=1 rollmap=-Y pitchmap=+X roll=0.50 pitch=1.50"];
+    case "LEVEL":
+      if (parts[1]) return ["OK LEVEL " + parts[1]];
+      return ["LEVEL enabled=0 active=0 sensor=1 rollcomp=0.00 pitchcomp=0.00 offsets=0.0/0.0/0.0/0.0 max=6.0 limit=20.0 trim=9/1/-1/-9"];
+    case "AUTOWALK":
+      if (parts[1]) return ["OK AUTOWALK " + parts[1]];
+      return [`AUTOWALK enabled=1 phase=${fw.autoPhase} delay=5000 run=10000 blocked=0`];
+    case "WIFI": return ["WIFI ssid=RobotDog-0FA1 pass=12345678 ip=192.168.4.1 clients=0 sta=CONNECTED sta_ip=172.20.10.3 sta_ssid=My Phone=1"];
+    case "ARM": fw.armed = true; fw.ctrl = "SERIAL"; fw.lease = now + 1000; return ["OK ARM"];
+    case "HB": if (!fw.armed) return ["ERR not_armed"]; fw.lease = now + 1000; return ["OK HB"];
+    case "WALKHB": if (!fw.armed) return ["ERR not_armed"]; fw.lease = now + 1000; fw.walk = parts[1] === "STOP" ? "STOPPED" : parts[1]; return ["OK WALKHB " + parts[1]];
+    case "WALK": fw.armed = false; fw.ctrl = "NONE"; fw.walk = "STOPPED"; fw.stop = "serial_stop"; fw.autoPhase = "IDLE"; return ["OK WALK STOPPED"];
+    case "DISARM": fw.armed = false; fw.ctrl = "NONE"; fw.walk = "STOPPED"; return ["OK DISARM"];
+    case "SETTLED": return ["SETTLED 1"];
+    case "WIFI_SET": return ["OK WIFI_SET"];
+    default: return ["ERR unknown_command"];
+  }
+}
+function makeFakePort() {
+  let waiting = null, failRead = null;
+  const queue = [];
+  const push = (text) => {
+    const chunk = Buffer.from(text, "utf8");
+    if (waiting) { const give = waiting; waiting = null; give({ value: chunk, done: false }); } else queue.push(chunk);
+  };
+  return {
+    unplug() { fw.opened = false; if (failRead) failRead(new Error("device lost")); },
+    open: async () => { if (fw.busy) throw new Error("port busy"); fw.opened = true; fw.openCount++; fw.granted = true; queue.length = 0; },
+    close: async () => { fw.opened = false; fw.closeCount++; },
+    readable: { getReader: () => ({
+      read: () => (queue.length ? Promise.resolve({ value: queue.shift(), done: false })
+        : new Promise((resolve, reject) => { waiting = resolve; failRead = reject; })),
+      cancel: async () => { if (waiting) { const give = waiting; waiting = null; give({ done: true }); } },
+      releaseLock() {} }) },
+    writable: { getWriter: () => ({
+      write: async (bytes) => {
+        if (!fw.opened) throw new Error("device lost");
+        Buffer.from(bytes).toString("utf8").split("\r\n").filter(Boolean).forEach((line) => {
+          fw.log.push({ t: now, line });
+          if (!fw.silent) fwHandle(line).forEach((reply) => push(reply + "\r\n"));
+        });
+      },
+      releaseLock() {} }) },
+  };
+}
+if (MODE === "file" || MODE === "file-noserial") {
+  const ls = {};
+  const fakePort = makeFakePort();
+  context.__port = fakePort;
+  context.location = { protocol: "file:", host: "" };
+  context.window.localStorage = { getItem: (k) => (k in ls ? ls[k] : null), setItem: (k, v) => { ls[k] = String(v); } };
+  context.TextEncoder = TextEncoder;
+  context.TextDecoder = TextDecoder;
+  context.navigator = MODE === "file" ? { serial: {
+    getPorts: async () => (fw.granted ? [fakePort] : []),
+    requestPort: async () => { fw.requestCount++; return fakePort; } } } : {};
+}
+if (MODE === "framed") { context.window.top = {}; context.window.self = context.window; }
 context.AbortController = context.window.AbortController;  // window is the global in a browser
 vm.createContext(context);
 
@@ -213,7 +286,97 @@ if (MODE === "gateway") (async () => {
   process.stdout.write(JSON.stringify(g));
 })();
 
-if (MODE !== "gateway") (async () => {
+if (MODE === "framed") (async () => {
+  vm.runInContext(script, context);
+  await advance(600);
+  process.stdout.write(JSON.stringify({ connCardHidden: el("connCard").hidden, armed: el("sArmed").textContent }));
+})();
+
+if (MODE === "file-noserial") (async () => {
+  vm.runInContext(script, context);
+  await advance(600);
+  const view = { serialDisabled: el("cmSerial").disabled, note: el("connNote").textContent };
+  el("cmSerial").onclick();
+  await advance(600);
+  view.msg = el("msg").textContent;
+  el("hsGo").onclick();
+  await advance(300);
+  view.frame = el("wifiFrame").src;
+  process.stdout.write(JSON.stringify(view));
+})();
+
+if (MODE === "file") (async () => {
+  const sent = (from) => fw.log.slice(from).map((e) => e.line);
+  const view = () => Object.assign(connView(), { armed: el("sArmed").textContent, walk: el("sWalk").textContent,
+    fwd: dirButtons[0].disabled, arm: el("arm").disabled, opened: fw.opened, frame: el("wifiFrame").src,
+    frameCardHidden: el("frameCard").hidden, localUiHidden: el("localUi").hidden, fetches: statusUrls.length + posts.length,
+    serialRowHidden: el("serialRow").hidden, autoCardHidden: el("autoCard").hidden, joints: el("joints").innerHTML });
+  vm.runInContext(script, context);
+  await advance(800);
+  const f = { initial: Object.assign(view(), { serialHidden: el("cmSerial").hidden, usbHidden: el("cmUsb").hidden,
+    offHidden: el("cmOff").hidden, serialDisabled: el("cmSerial").disabled, opens: fw.openCount }) };
+  el("arm").onclick();                       // not connected: refused, nothing is written
+  await advance(200);
+  f.armWhileOff = { msg: el("msg").textContent, written: fw.log.length };
+
+  fw.autoPhase = "WAITING";                  // the board has just booted and is about to walk by itself
+  el("cmSerial").onclick();
+  await advance(1500);
+  f.connected = Object.assign(view(), { requests: fw.requestCount, autoPhase: fw.autoPhase, log: sent(0).slice(0, 4),
+    stops: sent(0).filter((l) => l === "WALK STOP").length, fwArmed: fw.armed });
+
+  el("arm").onclick();
+  await advance(400);
+  dirButtons[0].onclick();
+  await advance(3000);                       // three lease periods: only heartbeats keep it walking
+  f.walking = Object.assign(view(), { fwArmed: fw.armed, fwWalk: fw.walk, hb: sent(0).filter((l) => l === "HB").length });
+  el("cmOff").onclick();                     // armed by this page: leaving is refused
+  await advance(300);
+  f.refusedArmed = Object.assign(view(), { fwArmed: fw.armed });
+
+  let mark = fw.log.length;
+  el("stop").onclick();
+  await advance(400);
+  f.stopped = Object.assign(view(), { fwArmed: fw.armed, stops: sent(mark).filter((l) => l === "WALK STOP").length });
+
+  // Firmware stops answering while armed: status goes stale, heartbeats must stop.
+  el("arm").onclick();
+  await advance(400);
+  f.rearmed = fw.armed;
+  fw.silent = true;
+  await advance(1000);
+  mark = fw.log.length;
+  await advance(3000);
+  f.silent = Object.assign(view(), { hbAfterStale: sent(mark).filter((l) => l === "HB").length });
+  fw.silent = false;
+  await advance(3000);
+  f.afterSilent = Object.assign(view(), { fwArmed: fw.armed });
+
+  // Switch to Wi-Fi: the robot is stopped, the pose is confirmed, the port is closed, the frame opens.
+  mark = fw.log.length;
+  el("cmHot").onclick();
+  await advance(1200);
+  f.wifi = Object.assign(view(), { tail: sent(mark).filter((l) => l === "WALK STOP" || l === "SETTLED"), closes: fw.closeCount,
+    stored: context.__ls });
+  mark = fw.log.length;
+  el("cmOff").onclick();
+  await advance(600);
+  f.off = Object.assign(view(), { written: fw.log.length - mark });
+
+  el("cmSerial").onclick();                  // the port was allowed before: no chooser this time
+  await advance(1500);
+  f.reconnected = Object.assign(view(), { requests: fw.requestCount, opens: fw.openCount, fwArmed: fw.armed });
+  context.__port.unplug();
+  await advance(1500);
+  f.unplugged = view();
+  fw.busy = true;                            // another program holds the port
+  el("cmSerial").onclick();
+  await advance(800);
+  f.busy = view();
+  process.stdout.write(JSON.stringify(f));
+})();
+
+if (MODE === "robot") (async () => {
   vm.runInContext(script, context);
   await advance(2000);
   const report = { freshHb: hbCount(), fresh: snapshot(), chartLines: draw.lineTo };
