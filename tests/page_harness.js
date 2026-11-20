@@ -437,6 +437,39 @@ if (MODE === "robot") (async () => {
   report.model.outOfRange = el("joints").innerHTML;
   sim.gamma = 90;
 
+  // ---- optional 3D renderer (three.js module is not run here: a fake renderer) --
+  const gl3 = { report: { noteBefore: el("mdGlNote").textContent, btnBefore: el("mdGl").disabled } };
+  const fakeGl = { draws: [], shown: [], fail: false,
+    show(on) { this.shown.push(on); },
+    draw(o) { if (this.fail) throw new Error("gl failure"); this.draws.push({ ortho: o.ortho, legs: Object.keys(o.angles).filter((k) => o.angles[k]).length });
+      return (p) => [p[0], p[1]]; } };
+  T.attach3d(fakeGl);
+  let lines0 = draw2.mdCanvas;
+  await advance(600);
+  gl3.report.ok = { note: el("mdGlNote").textContent, btn: el("mdGl").disabled, draws: fakeGl.draws.length,
+    lastShown: fakeGl.shown[fakeGl.shown.length - 1], lines2d: draw2.mdCanvas - lines0, last: fakeGl.draws[fakeGl.draws.length - 1] };
+  el("mdVSide").onclick();
+  gl3.report.side = fakeGl.draws[fakeGl.draws.length - 1];
+  el("mdV3d").onclick();
+  el("mdGl").onclick();                   // 3D off: back to the 2D drawing
+  lines0 = draw2.mdCanvas;
+  await advance(600);
+  gl3.report.off = { lastShown: fakeGl.shown[fakeGl.shown.length - 1], lines2d: draw2.mdCanvas - lines0, note: el("mdGlNote").textContent };
+  el("mdGl").onclick();
+  await advance(600);
+  statusMode = "fail";                    // stale pose: the 3D model must be hidden
+  await advance(2500);
+  gl3.report.stale = { lastShown: fakeGl.shown[fakeGl.shown.length - 1] };
+  statusMode = "ok";
+  await advance(600);
+  fakeGl.fail = true;                     // renderer breaks: fall back to 2D for good
+  lines0 = draw2.mdCanvas;
+  await advance(600);
+  gl3.report.broken = { lastShown: fakeGl.shown[fakeGl.shown.length - 1], lines2d: draw2.mdCanvas - lines0,
+    note: el("mdGlNote").textContent, btn: el("mdGl").disabled, joints: el("joints").innerHTML };
+  T.fail3d("test");
+  report.gl3 = gl3.report;
+
   // ---- leveling ON/OFF comparison ---------------------------------------------
   const cmpView = () => ({ summary: el("cmpSummary").textContent, body: el("cmpBody").innerHTML, state: el("cmpState").textContent });
   const postsBefore = posts.length - hbCount();

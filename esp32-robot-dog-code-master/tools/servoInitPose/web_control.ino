@@ -329,7 +329,8 @@ void sendJsonResult(int status, const char *error)
 void handleRoot()
 {
   sendNoStoreHeaders();
-  webServer.send(200, "text/html; charset=utf-8", ROBOT_CONTROL_PAGE);
+  // send_P streams straight from flash; send() would copy the ~100 kB page into a heap String.
+  webServer.send_P(200, "text/html; charset=utf-8", ROBOT_CONTROL_PAGE, sizeof(ROBOT_CONTROL_PAGE) - 1);
 }
 
 // Blocks DNS rebinding: a foreign web page whose host name resolves to one of

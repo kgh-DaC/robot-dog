@@ -1,5 +1,6 @@
 """Runs the shared control page script in Node with a fake DOM (tests/page_harness.js)."""
 import json
+import re
 import shutil
 import subprocess
 import unittest
@@ -192,6 +193,39 @@ class JointModelTests(unittest.TestCase):
             self.assertNotIn("NaN", html)
             self.assertNotIn("undefined", html)
         self.assertIn("170", self.report["model"]["outOfRange"])
+
+    def test_3d_renderer_is_optional_and_falls_back_to_2d(self):
+        g = self.report["gl3"]
+        self.assertTrue(g["btnBefore"])                            # no three.js: button off, 2D only
+        self.assertIn("기본 그리기", g["noteBefore"])
+        self.assertFalse(g["ok"]["btn"])
+        self.assertIn("three.js", g["ok"]["note"])
+        self.assertGreater(g["ok"]["draws"], 0)
+        self.assertTrue(g["ok"]["lastShown"])
+        self.assertEqual(g["ok"]["lines2d"], 0)                    # 2D legs not drawn under the 3D model
+        self.assertEqual(g["ok"]["last"], {"ortho": False, "legs": 4})
+        self.assertTrue(g["side"]["ortho"])                        # fixed views use an undistorted camera
+        self.assertFalse(g["off"]["lastShown"])
+        self.assertGreater(g["off"]["lines2d"], 20)
+        self.assertFalse(g["stale"]["lastShown"])                  # stale pose never stays on screen in 3D
+        self.assertFalse(g["broken"]["lastShown"])
+        self.assertGreater(g["broken"]["lines2d"], 20)
+        self.assertTrue(g["broken"]["btn"])
+        self.assertIn("그리기 오류", g["broken"]["note"])
+        for leg in ("LF", "RF", "LH", "RH"):
+            self.assertIn("<th>" + leg + "</th>", g["broken"]["joints"])
+
+    def test_only_external_resource_is_pinned_three_js(self):
+        html = PAGE.read_text(encoding="utf-8")
+        main = re.search(r"<script>([\s\S]*?)</script>", html).group(1)
+        self.assertNotRegex(main, r"https://")
+        urls = set(re.findall(r"https://[^\s\"'<>)]+", html))
+        self.assertEqual(urls, {"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.min.js"})
+        self.assertRegex(html, r'THREE_SRI = "sha384-[A-Za-z0-9+/]{64}"')
+        self.assertIn("integrity: THREE_SRI", html)
+        self.assertIn('referrerPolicy: "no-referrer"', html)
+        module = re.search(r'<script type="module">([\s\S]*?)</script>', html).group(1)
+        self.assertNotIn("api/command", module)                    # the 3D module never sends commands
 
     def test_stale_model_table_has_no_values(self):
         for mode in ("fail", "hang"):

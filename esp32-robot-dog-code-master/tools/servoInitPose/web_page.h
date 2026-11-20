@@ -55,7 +55,8 @@ h2{font-size:16px;margin:0}
 .seg{display:flex;gap:4px;flex-wrap:wrap}
 .seg button{padding:6px 12px;font-size:13px}
 .seg button.on{outline:none;border-color:var(--active);color:var(--active);font-weight:600}
-#mdCanvas{width:100%;height:320px;display:block;touch-action:pan-y;cursor:grab}
+#mdCanvas{position:relative;z-index:1;width:100%;height:320px;display:block;touch-action:pan-y;cursor:grab}
+#mdGlCanvas{position:absolute;left:0;top:0;width:100%;height:320px;display:block;pointer-events:none}
 .cmpChart{width:100%;height:150px;display:block;touch-action:pan-y}
 .scroll{overflow-x:auto}
 .scroll table{min-width:520px}
@@ -130,6 +131,7 @@ input{font:inherit;border:1px solid var(--line);border-radius:10px;background:va
     <div class="seg" style="margin:8px 0">
       <button id="mdCorr">보정 포함</button>
       <button id="mdGhost">중립 자세 겹쳐 보기</button>
+      <button id="mdGl" disabled>입체 렌더링</button>
     </div>
     <div class="scroll"><table>
       <thead><tr><th>다리</th><th>ALPHA</th><th>BETA</th><th>GAMMA</th><th>무릎 x, y, z (mm)</th><th>발 x, y, z (mm)</th></tr></thead>
@@ -137,6 +139,7 @@ input{font:inherit;border:1px solid var(--line);border-radius:10px;background:va
     </table></div>
     <p class="note">명령한 관절 목표각(도)으로 계산한 모형입니다. 몸통은 고정이고 다리 모양만 보여 주며, 바닥에 닿았는지는 나타내지 않습니다. 서보에는 위치 피드백이 없어 실제 자세와 다를 수 있습니다. 좌표는 몸통 중심 기준입니다 (x 오른쪽, y 앞, z 위). 3D 보기는 끌어서 돌릴 수 있습니다. 치수: 윗다리 51.9 mm, 아랫다리 50 mm, 좌우 어깨 간격 80 mm, 앞뒤 어깨 간격 141 mm(미실측). “보정 포함”은 수평 유지 보정과 서 있는 자세 보정(다리별 GAMMA)을 더한, 서보에 실제로 보내는 각도입니다.</p>
     <p class="note" id="mdTrim"></p>
+    <p class="note" id="mdGlNote"></p>
   </section>
 
   <aside class="ctrl">
@@ -1138,7 +1141,13 @@ input{font:inherit;border:1px solid var(--line);border-radius:10px;background:va
     });
     return out;
   }
-  var md = { view: "3d", yaw: -2.5, pitch: 0.42, corr: true, ghost: true, drag: null };
+  // Neutral pose drawn as the ghost (RH ALPHA starts at 86 on this robot).
+  function ghostAngles(leg) { return [leg === "RH" ? 86 : NEUTRAL[0], NEUTRAL[1], NEUTRAL[2]]; }
+  // gl: optional three.js renderer attached by the module script below (null = 2D only).
+  // glState "loading" | "ok" | "fail"; the 2D drawing is always the fallback.
+  var md = { view: "3d", yaw: -2.5, pitch: 0.42, corr: true, ghost: true, drag: null,
+    gl: null, glOn: true, glState: "loading", glWhy: "", glT0: Date.now() };
+  var GL_WAIT_MS = 20000;
   var MD_VIEWS = { side: [-Math.PI / 2, 0], front: [Math.PI, 0], top: [0, Math.PI / 2] };
   var MD_BTN = { "3d": "mdV3d", side: "mdVSide", front: "mdVFront", top: "mdVTop" };
   function mm(v) { return String(Math.round(v) + 0); }
@@ -1165,6 +1174,13 @@ input{font:inherit;border:1px solid var(--line);border-radius:10px;background:va
     if (fresh && !levelOffsets(state)) {
       $("mdTrim").textContent += " 수평 보정: 알 수 없음 — 값이 없어 모형에 포함되지 않습니다.";
     }
+    if (md.glState === "loading" && Date.now() - md.glT0 > GL_WAIT_MS) { md.glState = "fail"; md.glWhy = "시간 초과"; }
+    $("mdGl").disabled = md.glState !== "ok";
+    $("mdGl").classList.toggle("on", md.glState === "ok" && md.glOn);
+    $("mdGlNote").textContent = md.glState === "ok" ?
+      (md.glOn ? "입체 렌더링: three.js r160 (인터넷에서 받아 무결성 확인). 끄면 기본 그리기로 봅니다." : "입체 렌더링 꺼짐: 기본 그리기로 표시합니다.") :
+      md.glState === "fail" ? "입체 렌더링을 쓸 수 없어 기본 그리기로 표시합니다 (" + md.glWhy + "). 로봇 Wi-Fi처럼 인터넷이 없으면 정상입니다." :
+      "입체 렌더링을 불러오는 중입니다. 그동안 기본 그리기로 표시합니다.";
     drawModel(angles);
   }
   function drawModel(angles) {
@@ -1180,12 +1196,34 @@ input{font:inherit;border:1px solid var(--line);border-radius:10px;background:va
     g.clearRect(0, 0, w, h);
     var ink = cssVar("--ink"), muted = cssVar("--muted"), line = cssVar("--line"), card = cssVar("--card");
     g.font = "12px system-ui, sans-serif"; g.textAlign = "center"; g.textBaseline = "middle";
+    var useGl = !!(md.gl && md.glOn && angles);
+    if (md.gl) md.gl.show(useGl);              // stale or unknown pose: never leave the 3D model up
     if (!angles) {
       g.fillStyle = muted; g.fillText("연결이 끊겨 자세를 알 수 없습니다", w / 2, h / 2);
       return;
     }
     var yaw = md.view === "3d" ? md.yaw : MD_VIEWS[md.view][0], pitch = md.view === "3d" ? md.pitch : MD_VIEWS[md.view][1];
     var cy = Math.cos(yaw), sy = Math.sin(yaw), cp = Math.cos(pitch), sp = Math.sin(pitch), k = Math.min(w, h) / 205;
+    if (useGl) {
+      try {
+        // The 3D renderer draws the solids; this canvas (on top, transparent) keeps the labels.
+        var proj = md.gl.draw({ angles: angles, yaw: yaw, pitch: pitch, ortho: md.view !== "3d", w: w, h: h, k: k,
+          ghost: md.ghost, dpr: dpr });
+        g.fillStyle = muted;
+        var put = function (p, text, dy) { var q = proj(p); if (q) g.fillText(text, q[0], q[1] + (dy || 0)); };
+        put([0, GEO.BL, GEO.BT], "앞", -12);
+        LEG_IDS.forEach(function (leg) {
+          var a = angles[leg], ga = ghostAngles(leg);
+          if (!a) { put(fkLeg(leg, ga[0], ga[1], ga[2]).foot, leg + " 알 수 없음", 16); return; }
+          put(fkLeg(leg, a[0], a[1], a[2]).foot, leg, 16);
+        });
+        return;
+      } catch (e) {
+        // A broken 3D renderer must not hide the pose: drop it and draw in 2D from now on.
+        md.gl.show(false); md.gl = null; md.glState = "fail"; md.glWhy = "그리기 오류";
+        g.clearRect(0, 0, w, h);
+      }
+    }
     // Orthographic: returns [screen x, screen y, depth] (larger depth = farther).
     var P = function (p) {
       var x1 = p[0] * cy - p[1] * sy, y1 = p[0] * sy + p[1] * cy, z = p[2] + 30;
@@ -1226,7 +1264,7 @@ input{font:inherit;border:1px solid var(--line);border-radius:10px;background:va
     var bad = cssVar("--stop");
     LEG_IDS.forEach(function (leg) {
       var side = LEG_POS[leg][0], color = cssVar(side < 0 ? "--series-1" : "--series-2");
-      var n = fkLeg(leg, leg === "RH" ? 86 : NEUTRAL[0], NEUTRAL[1], NEUTRAL[2]);  // RH ALPHA 초기값 86
+      var ga = ghostAngles(leg), n = fkLeg(leg, ga[0], ga[1], ga[2]);
       seg([side * GEO.BW, n.hip[1], 0], n.hip, 12 * k + 4, muted);                 // shoulder block
       if (md.ghost) { seg(n.hip, n.knee, 1.5, muted, [4, 4]); seg(n.knee, n.foot, 1.5, muted, [4, 4]); }
       var a = angles[leg];
@@ -1247,6 +1285,7 @@ input{font:inherit;border:1px solid var(--line);border-radius:10px;background:va
     Object.keys(MD_BTN).forEach(function (v) { $(MD_BTN[v]).onclick = function () { md.view = v; render(); }; });
     $("mdCorr").onclick = function () { md.corr = !md.corr; render(); };
     $("mdGhost").onclick = function () { md.ghost = !md.ghost; render(); };
+    $("mdGl").onclick = function () { md.glOn = !md.glOn; render(); };
     var canvas = $("mdCanvas");
     if (!canvas.addEventListener) return;
     canvas.addEventListener("pointerdown", function (e) {
@@ -1415,7 +1454,11 @@ input{font:inherit;border:1px solid var(--line);border-radius:10px;background:va
       canvas.addEventListener("pointerleave", function () { cmp.hover = null; render(); });
     });
   })();
-  window.RobotTwin = { geo: GEO, fkLeg: fkLeg, modelAngles: modelAngles, standTrim: standTrim, cmpStats: cmpStats, cmpCsv: cmpCsv };
+  window.RobotTwin = { geo: GEO, fkLeg: fkLeg, modelAngles: modelAngles, standTrim: standTrim, cmpStats: cmpStats, cmpCsv: cmpCsv,
+    legIds: LEG_IDS, legPos: LEG_POS, ghostAngles: ghostAngles, angleMin: ANGLE_MIN, angleMax: ANGLE_MAX, cssVar: cssVar,
+    // Called by the optional three.js module: gl = { show(on), draw(opts) -> project(p) }.
+    attach3d: function (gl) { md.gl = gl; md.glState = "ok"; md.glWhy = ""; render(); },
+    fail3d: function (why) { if (md.gl) md.gl.show(false); md.gl = null; md.glState = "fail"; md.glWhy = why || "알 수 없음"; render(); } };
 
   setInterval(poll, 250);
   setInterval(render, 500);
@@ -1453,6 +1496,178 @@ input{font:inherit;border:1px solid var(--line);border-radius:10px;background:va
   });
   poll();
 })();
+</script>
+<script type="module">
+// Optional 3D joint model. When the internet is reachable, three.js r160 is fetched
+// from the CDN with a pinned SHA-384 (fetch integrity), so a changed file is refused.
+// Any failure (robot hotspot without internet, no WebGL, hash mismatch, timeout)
+// leaves the Canvas 2D model in place. This script never sends a robot command and
+// draws only when the main script asks (no animation loop, polling is untouched).
+const T = window.RobotTwin;
+const THREE_URL = "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.min.js";
+const THREE_SRI = "sha384-8/hf5tabFfIo0BPku31TKUvGIKpWGYaMwNtlSNqNyZzXgZCMd4lnOGWbJElML9dv";
+const LOAD_TIMEOUT_MS = 15000;
+
+async function loadThree() {
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), LOAD_TIMEOUT_MS);
+  try {
+    const res = await fetch(THREE_URL, { integrity: THREE_SRI, signal: ctl.signal, mode: "cors",
+      credentials: "omit", referrerPolicy: "no-referrer" });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const url = URL.createObjectURL(new Blob([await res.text()], { type: "text/javascript" }));
+    try { return await import(url); } finally { URL.revokeObjectURL(url); }
+  } finally { clearTimeout(timer); }
+}
+
+function build(THREE) {
+  const G = T.geo, D2R = Math.PI / 180;
+  const host = document.getElementById("mdCanvas");
+  const canvas = document.createElement("canvas");
+  canvas.id = "mdGlCanvas"; canvas.setAttribute("aria-hidden", "true"); canvas.style.visibility = "hidden";
+  host.parentNode.insertBefore(canvas, host);
+  let renderer;
+  try {
+    renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+  } catch (e) { canvas.remove(); throw new Error("WebGL 없음"); }
+  renderer.setClearColor(0x000000, 0);
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  canvas.addEventListener("webglcontextlost", (e) => { e.preventDefault(); T.fail3d("WebGL 컨텍스트 손실"); });
+
+  // Scene in the body frame of the 2D model: X right, Y front, Z up, 1 unit = 1 mm.
+  const scene = new THREE.Scene();
+  const hemi = new THREE.HemisphereLight(0xffffff, 0x445566, 1.6);
+  hemi.position.set(0, 0, 1);
+  scene.add(hemi);
+  const sun = new THREE.DirectionalLight(0xffffff, 2.2);
+  sun.position.set(-120, 80, 260);
+  sun.castShadow = true;
+  sun.shadow.mapSize.set(1024, 1024);
+  Object.assign(sun.shadow.camera, { left: -180, right: 180, top: 180, bottom: -180, near: 10, far: 600 });
+  scene.add(sun);
+
+  // Reference floor below the lowest reachable foot (L2 + L3). It is not a contact surface.
+  const FLOOR = -(G.L2 + G.L3) - 4;
+  const grid = new THREE.GridHelper(400, 20, 0x8a939c, 0x8a939c);
+  grid.rotation.x = Math.PI / 2; grid.position.z = FLOOR;
+  grid.material.transparent = true; grid.material.opacity = 0.35;
+  scene.add(grid);
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(400, 400), new THREE.ShadowMaterial({ opacity: 0.22 }));
+  floor.position.z = FLOOR + 0.2; floor.receiveShadow = true;
+  scene.add(floor);
+
+  const mat = (color, extra) => new THREE.MeshStandardMaterial(Object.assign({ color, roughness: 0.6, metalness: 0.05 }, extra));
+  const solid = (geo, m) => { const o = new THREE.Mesh(geo, m); o.castShadow = true; o.receiveShadow = true; scene.add(o); return o; };
+
+  // Body: printed shell, front panel and a heading marker on top.
+  const mBody = mat(0xd5d9de), mFront = mat(0x1857b8), mServo = mat(0x2b3036, { roughness: 0.45 });
+  const body = solid(new THREE.BoxGeometry(2 * G.BW, 2 * G.BL, G.BT - G.BB), mBody);
+  body.position.set(0, 0, (G.BT + G.BB) / 2);
+  const front = solid(new THREE.BoxGeometry(2 * G.BW - 6, 3, G.BT - G.BB - 6), mFront);
+  front.position.set(0, G.BL + 1.2, (G.BT + G.BB) / 2);
+  const nose = solid(new THREE.ConeGeometry(7, 16, 3), mFront);   // cone points +Y = front
+  nose.position.set(0, G.BL - 14, G.BT + 1.5); nose.scale.z = 0.35;
+
+  const UP = new THREE.Vector3(0, 1, 0);
+  const v3 = (p) => new THREE.Vector3(p[0], p[1], p[2]);
+  // Leg-plane normal (BETA/GAMMA rotation axis) after the ALPHA tilt.
+  const normalOf = (leg, alpha) => {
+    const side = T.legPos[leg][0], t = (90 - alpha) * D2R;
+    return new THREE.Vector3(Math.cos(t), 0, side * Math.sin(t)).normalize();
+  };
+  // Box/cylinder whose local Y runs from a to b and local X along the joint axis n.
+  const link = (obj, a, b, n) => {
+    const A = v3(a), B = v3(b), dir = B.clone().sub(A), len = dir.length();
+    dir.normalize();
+    const z = new THREE.Vector3().crossVectors(n, dir).normalize(), x = new THREE.Vector3().crossVectors(dir, z);
+    obj.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(x, dir, z));
+    obj.position.copy(A).add(B).multiplyScalar(0.5);
+    obj.scale.set(1, len, 1);
+  };
+  const axis = (obj, p, n) => { obj.position.copy(v3(p)); obj.quaternion.setFromUnitVectors(UP, n); };
+
+  const legs = {};
+  T.legIds.forEach((leg) => {
+    const side = T.legPos[leg][0], fy = T.legPos[leg][1] * G.SY;
+    const servo = solid(new THREE.BoxGeometry(G.SX - G.BW + 8, 24, 22), mServo);
+    servo.position.set(side * (G.BW + (G.SX - G.BW + 8) / 2 - 2), fy, 0);
+    const mLeg = mat(0x2a78d6), mJoint = mat(0xe8ebee, { roughness: 0.35 }), mKnee = mat(0xe8ebee, { roughness: 0.35 });
+    const ghostMat = new THREE.LineDashedMaterial({ color: 0x8a939c, dashSize: 4, gapSize: 4, transparent: true, opacity: 0.9 });
+    const ga = T.ghostAngles(leg), g0 = T.fkLeg(leg, ga[0], ga[1], ga[2]);      // fixed neutral pose
+    const ghost = new THREE.Line(new THREE.BufferGeometry().setFromPoints([v3(g0.hip), v3(g0.knee), v3(g0.foot)]), ghostMat);
+    ghost.computeLineDistances();
+    scene.add(ghost);
+    legs[leg] = {
+      mLeg, mJoint, mKnee, ghost,
+      upper: solid(new THREE.BoxGeometry(12, 1, 8), mLeg),                     // length set by scale.y
+      lower: solid(new THREE.CylinderGeometry(3.5, 4.5, 1, 16), mLeg),
+      hip: solid(new THREE.CylinderGeometry(7, 7, 16, 24), mJoint),
+      knee: solid(new THREE.CylinderGeometry(5.5, 5.5, 14, 24), mKnee),
+      foot: solid(new THREE.SphereGeometry(6, 20, 14), mServo),
+    };
+  });
+
+  const persp = new THREE.PerspectiveCamera(30, 1, 1, 4000);
+  const ortho = new THREE.OrthographicCamera(-1, 1, 1, -1, 1, 4000);
+  const TARGET = new THREE.Vector3(0, 0, -30);     // same centre as the 2D drawing (z + 30)
+  let size = "";
+  let camera = persp;
+
+  function draw(o) {
+    const pr = Math.min(o.dpr || 1, 2), key = o.w + "x" + o.h + "@" + pr;
+    if (key !== size) { renderer.setPixelRatio(pr); renderer.setSize(o.w, o.h, false); size = key; }
+    // Camera matching the 2D projection: right = (cy, -sy, 0), up = (sy sp, cy sp, cp), depth = (sy cp, cy cp, -sp).
+    const cy = Math.cos(o.yaw), sy = Math.sin(o.yaw), cp = Math.cos(o.pitch), sp = Math.sin(o.pitch);
+    const away = new THREE.Vector3(sy * cp, cy * cp, -sp), up = new THREE.Vector3(sy * sp, cy * sp, cp);
+    const halfH = o.h / 2 / o.k, halfW = o.w / 2 / o.k;
+    if (o.ortho) {
+      camera = ortho;
+      Object.assign(ortho, { left: -halfW, right: halfW, top: halfH, bottom: -halfH });
+      ortho.position.copy(TARGET).addScaledVector(away, -800);
+    } else {
+      camera = persp;
+      persp.aspect = o.w / o.h;
+      persp.position.copy(TARGET).addScaledVector(away, -(halfH / Math.tan(15 * D2R)) * 1.08);
+    }
+    camera.up.copy(up); camera.lookAt(TARGET); camera.updateProjectionMatrix();
+
+    const css = (name, def) => (T.cssVar(name) || def);
+    const bad = css("--stop", "#c62828");
+    mFront.color.set(css("--active", "#1857b8"));
+    const out = (v) => v < T.angleMin || v > T.angleMax;
+    T.legIds.forEach((leg) => {
+      const L = legs[leg], a = o.angles[leg], side = T.legPos[leg][0];
+      L.ghost.visible = !!o.ghost;
+      const shown = !!a;
+      [L.upper, L.lower, L.hip, L.knee, L.foot].forEach((m) => { m.visible = shown; });
+      if (!shown) return;
+      const p = T.fkLeg(leg, a[0], a[1], a[2]), n = normalOf(leg, a[0]);
+      L.mLeg.color.set(css(side < 0 ? "--series-1" : "--series-2", side < 0 ? "#2a78d6" : "#eb6834"));
+      L.mJoint.color.set(out(a[0]) || out(a[1]) ? bad : "#e8ebee");
+      L.mKnee.color.set(out(a[2]) ? bad : "#e8ebee");
+      link(L.upper, p.hip, p.knee, n);
+      link(L.lower, p.knee, p.foot, n);
+      axis(L.hip, p.hip, n); axis(L.knee, p.knee, n);
+      L.foot.position.copy(v3(p.foot));
+    });
+    renderer.render(scene, camera);
+    const cam = camera;
+    return (p) => {
+      const q = v3(p).project(cam);
+      return q.z > 1 ? null : [(q.x + 1) / 2 * o.w, (1 - q.y) / 2 * o.h];
+    };
+  }
+  return { show(on) { canvas.style.visibility = on ? "visible" : "hidden"; }, draw };
+}
+
+if (T && T.attach3d) {
+  loadThree().then((THREE) => T.attach3d(build(THREE))).catch((e) => {
+    const why = e && e.name === "AbortError" ? "시간 초과" :
+      e && /WebGL/.test(e.message) ? e.message : "three.js를 받지 못함";
+    T.fail3d(why);
+  });
+}
 </script>
 </body>
 </html>

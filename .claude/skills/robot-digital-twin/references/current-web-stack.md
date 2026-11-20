@@ -14,8 +14,10 @@
 
 ## 페이지 제약
 
-- **외부 리소스 금지.** ESP32 핫스팟(`RobotDog-XXXX`, `http://192.168.4.1`)에는 인터넷이 없다. CDN 스크립트·글꼴·이미지를 쓰지 않고 한 파일 안에서 끝낸다(three.js 등 외부 라이브러리 불가 → Canvas 2D 또는 인라인 SVG로 직접 그린다).
-- **크기.** 페이지는 플래시(PROGMEM)에 그대로 들어간다. 현재 약 25 kB. 늘어난 크기와 펌웨어 컴파일 결과(스케치 사용률)를 보고한다.
+- **외부 리소스 금지(예외 하나).** ESP32 핫스팟(`RobotDog-XXXX`, `http://192.168.4.1`)에는 인터넷이 없다. CDN 스크립트·글꼴·이미지를 쓰지 않고 한 파일 안에서 끝낸다. 모든 기능은 인터넷 없이 Canvas 2D 또는 인라인 SVG로 동작해야 한다.
+  - **예외 (2026-11-20, 사용자 선택 A안)**: 관절 모형의 입체 렌더링만 페이지 끝의 `<script type="module">`이 three.js r160(`three.module.min.js`)을 jsDelivr에서 받아 쓴다. 조건: 버전 고정 + `fetch(..., {integrity: sha384})` 무결성 고정(해시가 다르면 거부) + `referrerPolicy: "no-referrer"` + 15초 시간 제한. 실패하면(인터넷 없음, WebGL 없음, 해시 불일치, 그리기 오류) 기존 Canvas 2D 모형이 그대로 쓰인다. 모듈은 명령을 보내지 않고, 주 스크립트가 `render()`에서 부를 때만 그린다(애니메이션 루프 없음). 주 스크립트(`<script>`)에는 외부 URL이 없어야 하며 `test_only_external_resource_is_pinned_three_js`가 이를 검사한다. three.js 버전을 바꾸면 해시도 다시 계산한다(`openssl dgst -sha384 -binary three.module.min.js | openssl base64 -A`).
+  - 연결부: 주 스크립트의 `window.RobotTwin.attach3d(gl)` / `fail3d(why)`. `gl = { show(on), draw(opts) -> project(p) }`. 입체 렌더러가 몸체를 그리고, 위에 겹친 투명 `mdCanvas`가 글자(앞, 다리 이름, 알 수 없음)를 그리며 끌기 입력도 받는다.
+- **크기.** 페이지는 플래시(PROGMEM)에 그대로 들어간다. 2026-11-20 현재 약 99.6 kB(`web_page.h`). 펌웨어는 `send_P`로 플래시에서 바로 보낸다(`send()`는 페이지 전체를 힙 String으로 복사하므로 쓰지 않는다). 늘어난 크기와 펌웨어 컴파일 결과(스케치 사용률)를 보고한다.
 - **구문.** 기존 코드는 ES5 스타일(`var`, `function`)이고 `tests/page_harness.js`의 가짜 DOM에서 돈다. 새 DOM API를 쓰면 하네스에도 추가해야 한다.
 - **두 경로 동일.** 페이지를 바꾸면 `embed_page.py`를 다시 실행한다. Wi-Fi 경로에 반영하려면 펌웨어 재업로드가 필요하다(사용자 승인, 서보 전원 OFF, BOOT 버튼).
 - 밝은/어두운 테마 모두 CSS 변수로 지원한다.
