@@ -74,6 +74,12 @@ input{font:inherit;border:1px solid var(--line);border-radius:10px;background:va
 .target{font-family:ui-monospace,Consolas,monospace;font-size:13px}
 [hidden]{display:none!important}
 #localUi{display:grid;gap:14px;min-width:0}
+.mdBanner{position:absolute;left:8px;top:8px;z-index:2;max-width:calc(100% - 16px);background:var(--card);border:1px solid var(--warn);color:var(--warn);border-radius:8px;padding:4px 8px;font-size:12px;pointer-events:none}
+.chartwrap.initial canvas{opacity:.62}
+.pinsvg{width:100%;max-width:560px;height:auto;display:block;margin:6px auto}
+#pinLegend{flex-wrap:wrap;gap:6px 14px}
+.pintable th,.pintable td{text-align:left;vertical-align:top}
+.pintable td.pn{font-family:ui-monospace,Consolas,monospace;white-space:nowrap}
 #wifiFrame{width:100%;height:82vh;border:0;display:block;border-radius:8px;background:var(--bg)}
 </style>
 </head>
@@ -125,7 +131,8 @@ input{font:inherit;border:1px solid var(--line);border-radius:10px;background:va
         <button id="mdVTop">위</button>
       </div>
     </div>
-    <div class="chartwrap">
+    <div class="chartwrap" id="mdWrap">
+      <div id="mdBanner" class="mdBanner" hidden></div>
       <canvas id="mdCanvas" role="img" aria-label="관절 각도로 그린 네 다리 모형"></canvas>
     </div>
     <div class="seg" style="margin:8px 0">
@@ -265,6 +272,20 @@ input{font:inherit;border:1px solid var(--line);border-radius:10px;background:va
 
   </div>
 
+  <section class="card" id="pinCard">
+    <div class="lvhead">
+      <h2>ESP32 핀 연결 (하드웨어 정보)</h2>
+      <span class="note">ESP32 DevKit V1 30핀 · 안테나가 위쪽</span>
+    </div>
+    <svg id="pinSvg" class="pinsvg" viewBox="0 0 560 590" role="img" aria-label="ESP32 30핀 보드에서 쓰는 핀 배치도"></svg>
+    <div class="legend" id="pinLegend"></div>
+    <div class="scroll"><table class="pintable">
+      <thead><tr><th>부품·기능</th><th>부품 단자</th><th>ESP32 핀</th><th>비고</th></tr></thead>
+      <tbody id="pinBody"></tbody>
+    </table></div>
+    <p class="note" id="pinNote" style="margin-top:8px"></p>
+  </section>
+
   <p class="note">안전: 로봇을 고정하거나 발을 띄운 상태에서 먼저 시험하고, 주변을 비우고, 전원 스위치를 손 닿는 곳에 두세요. 소프트웨어 정지에만 의존하지 마세요.</p>
 </main>
 <script>
@@ -365,6 +386,7 @@ input{font:inherit;border:1px solid var(--line);border-radius:10px;background:va
     connGen++;                        // replies from the old target are ignored
     if (pollCtrl) pollCtrl.abort();
     state = null; lastOk = 0;
+    if (md) md.seen = false;          // the model shows "before connecting" again
     store(false, conn);
     return "";
   }
@@ -1143,10 +1165,12 @@ input{font:inherit;border:1px solid var(--line);border-radius:10px;background:va
   }
   // Neutral pose drawn as the ghost (RH ALPHA starts at 86 on this robot).
   function ghostAngles(leg) { return [leg === "RH" ? 86 : NEUTRAL[0], NEUTRAL[1], NEUTRAL[2]]; }
+  // Pose shown before any robot state arrives: the firmware's start pose, no trim.
+  function initialAngles() { var o = {}; LEG_IDS.forEach(function (leg) { o[leg] = ghostAngles(leg); }); return o; }
   // gl: optional three.js renderer attached by the module script below (null = 2D only).
   // glState "loading" | "ok" | "fail"; the 2D drawing is always the fallback.
   var md = { view: "3d", yaw: -2.5, pitch: 0.42, corr: true, ghost: true, drag: null,
-    gl: null, glOn: true, glState: "loading", glWhy: "", glT0: Date.now() };
+    gl: null, glOn: true, glState: "loading", glWhy: "", glT0: Date.now(), seen: false };
   var GL_WAIT_MS = 20000;
   var MD_VIEWS = { side: [-Math.PI / 2, 0], front: [Math.PI, 0], top: [0, Math.PI / 2] };
   var MD_BTN = { "3d": "mdV3d", side: "mdVSide", front: "mdVFront", top: "mdVTop" };
@@ -1155,9 +1179,17 @@ input{font:inherit;border:1px solid var(--line);border-radius:10px;background:va
     Object.keys(MD_BTN).forEach(function (v) { $(MD_BTN[v]).classList.toggle("on", md.view === v); });
     $("mdCorr").classList.toggle("on", md.corr);
     $("mdGhost").classList.toggle("on", md.ghost);
-    var angles = fresh ? modelAngles(state, md.corr) : null, rows = "";
+    // Not connected (or the state went stale): draw the initial pose, clearly marked as not live.
+    var live = fresh ? modelAngles(state, md.corr) : null, rows = "";
+    if (live) md.seen = true;
+    var angles = live || initialAngles();
+    $("mdBanner").hidden = !!live;
+    $("mdBanner").textContent = live ? "" : md.seen ?
+      "연결 끊김 — 실제 자세를 알 수 없어 초기 자세(90/45/90)를 표시합니다" :
+      "연결 전 — 초기 자세(90/45/90, RH ALPHA 86)입니다. 연결되면 실제 명령 각도로 바뀝니다";
+    $("mdWrap").classList.toggle("initial", !live);
     LEG_IDS.forEach(function (leg) {
-      var a = angles && angles[leg];
+      var a = live && live[leg];
       if (!a) { rows += "<tr><th>" + leg + "</th><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td></tr>"; return; }
       var base = state.angles[leg], p = fkLeg(leg, a[0], a[1], a[2]);
       var gamma = a[2] === base[2] ? String(base[2]) : base[2] + " <small>→ " + a[2].toFixed(1) + "</small>";
@@ -1181,9 +1213,9 @@ input{font:inherit;border:1px solid var(--line);border-radius:10px;background:va
       (md.glOn ? "입체 렌더링: three.js r160 (인터넷에서 받아 무결성 확인). 끄면 기본 그리기로 봅니다." : "입체 렌더링 꺼짐: 기본 그리기로 표시합니다.") :
       md.glState === "fail" ? "입체 렌더링을 쓸 수 없어 기본 그리기로 표시합니다 (" + md.glWhy + "). 로봇 Wi-Fi처럼 인터넷이 없으면 정상입니다." :
       "입체 렌더링을 불러오는 중입니다. 그동안 기본 그리기로 표시합니다.";
-    drawModel(angles);
+    drawModel(angles, !live);
   }
-  function drawModel(angles) {
+  function drawModel(angles, initial) {
     var canvas = $("mdCanvas");
     if (!canvas.getContext || !canvas.getBoundingClientRect) return;
     var rect = canvas.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
@@ -1196,8 +1228,8 @@ input{font:inherit;border:1px solid var(--line);border-radius:10px;background:va
     g.clearRect(0, 0, w, h);
     var ink = cssVar("--ink"), muted = cssVar("--muted"), line = cssVar("--line"), card = cssVar("--card");
     g.font = "12px system-ui, sans-serif"; g.textAlign = "center"; g.textBaseline = "middle";
-    var useGl = !!(md.gl && md.glOn && angles);
-    if (md.gl) md.gl.show(useGl);              // stale or unknown pose: never leave the 3D model up
+    var useGl = !!(md.gl && md.glOn && angles), ghost = md.ghost && !initial;   // the ghost would sit on the pose
+    if (md.gl) md.gl.show(useGl);
     if (!angles) {
       g.fillStyle = muted; g.fillText("연결이 끊겨 자세를 알 수 없습니다", w / 2, h / 2);
       return;
@@ -1208,7 +1240,7 @@ input{font:inherit;border:1px solid var(--line);border-radius:10px;background:va
       try {
         // The 3D renderer draws the solids; this canvas (on top, transparent) keeps the labels.
         var proj = md.gl.draw({ angles: angles, yaw: yaw, pitch: pitch, ortho: md.view !== "3d", w: w, h: h, k: k,
-          ghost: md.ghost, dpr: dpr });
+          ghost: ghost, dpr: dpr });
         g.fillStyle = muted;
         var put = function (p, text, dy) { var q = proj(p); if (q) g.fillText(text, q[0], q[1] + (dy || 0)); };
         put([0, GEO.BL, GEO.BT], "앞", -12);
@@ -1266,7 +1298,7 @@ input{font:inherit;border:1px solid var(--line);border-radius:10px;background:va
       var side = LEG_POS[leg][0], color = cssVar(side < 0 ? "--series-1" : "--series-2");
       var ga = ghostAngles(leg), n = fkLeg(leg, ga[0], ga[1], ga[2]);
       seg([side * GEO.BW, n.hip[1], 0], n.hip, 12 * k + 4, muted);                 // shoulder block
-      if (md.ghost) { seg(n.hip, n.knee, 1.5, muted, [4, 4]); seg(n.knee, n.foot, 1.5, muted, [4, 4]); }
+      if (ghost) { seg(n.hip, n.knee, 1.5, muted, [4, 4]); seg(n.knee, n.foot, 1.5, muted, [4, 4]); }
       var a = angles[leg];
       if (!a) { label(n.foot, leg + " 알 수 없음", 16); return; }
       var p = fkLeg(leg, a[0], a[1], a[2]);
@@ -1454,8 +1486,83 @@ input{font:inherit;border:1px solid var(--line);border-radius:10px;background:va
       canvas.addEventListener("pointerleave", function () { cmp.hover = null; render(); });
     });
   })();
+  // ---- ESP32 pin map (bottom card) -----------------------------------------
+  // Servo GPIOs are the firmware defaults (servoInitPose.ino servos[], checked by a test).
+  // Header order: ESP32 DevKit V1 30-pin, antenna up (hardware/pcb/README.md).
+  var PIN_LEFT = ["EN", "VP", "VN", "34", "35", "32", "33", "25", "26", "27", "14", "12", "13", "GND", "VIN"];
+  var PIN_RIGHT = ["23", "22", "TX", "RX", "21", "19", "18", "5", "17", "16", "4", "2", "15", "GND", "3V3"];
+  var SERVO_NOTE = "서보 3핀: 신호(S) · + · -(갈색). ALPHA = 어깨(안팎), BETA = 윗다리(앞뒤), GAMMA = 무릎";
+  var PINMAP = [
+    { id: "LF", short: "LF", name: "왼앞 다리(LF) 서보 ×3", color: "#2a78d6", term: "서보 신호선",
+      pins: [["ALPHA", "25"], ["BETA", "26"], ["GAMMA", "27"]], note: "서보 전원: 왼쪽 Mini360 6 V" },
+    { id: "LH", short: "LH", name: "왼뒤 다리(LH) 서보 ×3", color: "#1f9e89", term: "서보 신호선",
+      pins: [["ALPHA", "13"], ["BETA", "12"], ["GAMMA", "14"]], note: "서보 전원: 왼쪽 Mini360 6 V. GPIO12는 부팅 스트래핑 핀(부팅 순간 HIGH로 끌리면 부팅 실패 가능)" },
+    { id: "RF", short: "RF", name: "오른앞 다리(RF) 서보 ×3", color: "#eb6834", term: "서보 신호선",
+      pins: [["ALPHA", "16"], ["BETA", "18"], ["GAMMA", "17"]], note: "서보 전원: 오른쪽 Mini360 6 V" },
+    { id: "RH", short: "RH", name: "오른뒤 다리(RH) 서보 ×3", color: "#c2489c", term: "서보 신호선",
+      pins: [["ALPHA", "4"], ["BETA", "2"], ["GAMMA", "15"]], note: "서보 전원: 오른쪽 Mini360 6 V. GPIO2·15는 부팅 스트래핑 핀. RH ALPHA 초기값 86°" },
+    { id: "imu", short: "IMU", name: "MPU9250 호환 IMU (I2C 0x68)", color: "#8a6fdc", term: "SDA · SCL · VCC(3V3) · GND · AD0→GND",
+      pins: [["SDA", "21"], ["SCL", "22"]], note: "기울기(roll/pitch) 측정, 수평 유지·20° 기울기 정지에 사용. 실제 칩은 WHO_AM_I 0x75인 호환품. INA219와 I2C 버스 공유(400 kHz)" },
+    { id: "ina", short: "INA", name: "INA219 전류·전압 센서 (I2C 0x40)", color: "#6b8e23", term: "SDA · SCL · VCC(3V3) · GND · VIN+ / VIN-",
+      pins: [["SDA", "21"], ["SCL", "22"]], note: "배터리 + → 스위치 → VIN+ → 션트 → VIN- → Mini360 3개. 배선만 되어 있고 지금 펌웨어(servoInitPose)는 값을 읽지 않음" },
+    { id: "usb", short: "USB", name: "USB 직렬 (CP210x)", color: "#b08900", term: "보드 USB 단자",
+      pins: [["TX", "TX"], ["RX", "RX"]], note: "GPIO1(TX)·GPIO3(RX). 펌웨어 업로드, 브라우저 직접 USB 연결, USB 게이트웨이. 다른 용도로 쓰지 않음" },
+    { id: "pwr", short: "전원", name: "전원 (2×18650 → Mini360)", color: "#c62828", term: "Mini360 5.2 V 출력 · 3V3 출력 · GND",
+      pins: [["5.2V 입력", "VIN"], ["3V3 출력", "3V3"], ["GND", "GND"]], note: "ESP32용 Mini360 5.2 V → VIN. 3V3 → IMU·INA219 VCC. 서보는 별도 Mini360 2개(왼쪽 6개·오른쪽 6개, 각 6 V). 모든 GND 공통" }
+  ];
+  function pinUsers(label) {
+    var out = [];
+    PINMAP.forEach(function (g) { g.pins.forEach(function (p) { if (p[1] === label) out.push({ g: g, t: p[0] }); }); });
+    return out;
+  }
+  function pinText(p) { return /^\d+$/.test(p[1]) ? p[0] + " = GPIO" + p[1] : p[0] + " = " + p[1]; }
+  function pinSvg() {
+    var W = 560, x0 = 215, x1 = 345, y0 = 130, dy = 30, out = [];
+    var t = function (x, y, text, anchor, style) {
+      return '<text x="' + x + '" y="' + y + '" text-anchor="' + anchor + '" dominant-baseline="middle" style="' + style + '">' + text + "</text>";
+    };
+    out.push('<rect x="190" y="20" width="180" height="560" rx="10" style="fill:var(--bg);stroke:var(--line);stroke-width:2"/>');
+    out.push('<rect x="220" y="30" width="120" height="60" rx="4" style="fill:none;stroke:var(--muted);stroke-dasharray:4 3"/>');
+    out.push(t(280, 60, "안테나", "middle", "fill:var(--muted);font-size:12px"));
+    out.push('<rect x="252" y="250" width="56" height="120" rx="4" style="fill:var(--card);stroke:var(--line)"/>');
+    out.push(t(280, 300, "ESP32", "middle", "fill:var(--ink);font-size:13px;font-weight:600"));
+    out.push(t(280, 320, "WROOM", "middle", "fill:var(--muted);font-size:10px"));
+    out.push('<rect x="255" y="555" width="50" height="22" rx="3" style="fill:var(--card);stroke:var(--muted)"/>');
+    out.push(t(280, 566, "USB", "middle", "fill:var(--muted);font-size:11px"));
+    [[PIN_LEFT, x0, -1], [PIN_RIGHT, x1, 1]].forEach(function (col) {
+      col[0].forEach(function (label, i) {
+        var y = y0 + i * dy, users = pinUsers(label), c = users.length ? users[0].g.color : "";
+        out.push('<circle cx="' + col[1] + '" cy="' + y + '" r="8" style="' +
+          (c ? "fill:" + c + ";stroke:" + c : "fill:none;stroke:var(--muted)") + ';stroke-width:2"/>');
+        out.push(t(col[1] - col[2] * 14, y, label, col[2] < 0 ? "start" : "end",
+          "fill:" + (users.length ? "var(--ink)" : "var(--muted)") + ";font-size:11px;font-family:ui-monospace,Consolas,monospace"));
+        if (!users.length) return;
+        var text = users.map(function (u) { return u.g.short + " " + u.t; }).join(", ");
+        out.push('<line x1="' + (col[1] + col[2] * 10) + '" y1="' + y + '" x2="' + (col[1] + col[2] * 26) + '" y2="' + y +
+          '" style="stroke:' + c + ';stroke-width:2"/>');
+        out.push(t(col[1] + col[2] * 30, y, text, col[2] < 0 ? "end" : "start", "fill:" + c + ";font-size:12px;font-weight:600"));
+      });
+    });
+    return out.join("");
+  }
+  function renderPins() {
+    $("pinCard").hidden = framed;      // the outer local page already shows this card
+    $("pinBody").innerHTML = PINMAP.map(function (g) {
+      return '<tr><td><span class="sw" style="background:' + g.color + '"></span>' + g.name + "</td><td>" + g.term +
+        '</td><td class="pn">' + g.pins.map(pinText).join("<br>") + "</td><td>" + g.note + "</td></tr>";
+    }).join("");
+    $("pinLegend").innerHTML = PINMAP.map(function (g) {
+      return '<span><span class="sw" style="background:' + g.color + '"></span>' + g.short + "</span>";
+    }).join("");
+    $("pinSvg").innerHTML = pinSvg();
+    $("pinNote").textContent = SERVO_NOTE + ". 핀 값은 펌웨어 기본값이며 로봇에서 읽어 온 값이 아닙니다 " +
+      "(시험용 PIN LF GAMMA 명령으로 바꾼 핀은 반영되지 않음). 보드 핀 배열은 일반 ESP32 DevKit V1 30핀 기준이니 실물 실크 인쇄와 맞는지 확인하세요. " +
+      "자세한 배선: hardware/pcb/README.md";
+  }
+  renderPins();
+
   window.RobotTwin = { geo: GEO, fkLeg: fkLeg, modelAngles: modelAngles, standTrim: standTrim, cmpStats: cmpStats, cmpCsv: cmpCsv,
-    legIds: LEG_IDS, legPos: LEG_POS, ghostAngles: ghostAngles, angleMin: ANGLE_MIN, angleMax: ANGLE_MAX, cssVar: cssVar,
+    legIds: LEG_IDS, legPos: LEG_POS, ghostAngles: ghostAngles, initialAngles: initialAngles, pinMap: PINMAP, angleMin: ANGLE_MIN, angleMax: ANGLE_MAX, cssVar: cssVar,
     // Called by the optional three.js module: gl = { show(on), draw(opts) -> project(p) }.
     attach3d: function (gl) { md.gl = gl; md.glState = "ok"; md.glWhy = ""; render(); },
     fail3d: function (why) { if (md.gl) md.gl.show(false); md.gl = null; md.glState = "fail"; md.glWhy = why || "알 수 없음"; render(); } };

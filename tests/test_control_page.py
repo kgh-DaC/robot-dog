@@ -207,7 +207,13 @@ class JointModelTests(unittest.TestCase):
         self.assertTrue(g["side"]["ortho"])                        # fixed views use an undistorted camera
         self.assertFalse(g["off"]["lastShown"])
         self.assertGreater(g["off"]["lines2d"], 20)
-        self.assertFalse(g["stale"]["lastShown"])                  # stale pose never stays on screen in 3D
+        st = g["stale"]                                            # stale: initial pose, marked as not live
+        self.assertTrue(st["lastShown"])
+        self.assertEqual(st["last"]["legs"], 4)
+        self.assertFalse(st["bannerHidden"])
+        self.assertIn("연결 끊김", st["banner"])
+        self.assertIn("실제 자세를 알 수 없어", st["banner"])
+        self.assertEqual(st["joints"].count("<td>-</td>"), 20)    # the table never shows the initial pose as data
         self.assertFalse(g["broken"]["lastShown"])
         self.assertGreater(g["broken"]["lines2d"], 20)
         self.assertTrue(g["broken"]["btn"])
@@ -423,6 +429,47 @@ class DirectSerialTests(unittest.TestCase):
         cls.f = run("file")
         cls.noserial = run("file-noserial")
         cls.framed = run("framed")
+
+    def test_initial_pose_is_drawn_before_connecting(self):
+        v = self.f["initial"]
+        self.assertGreater(v["mdLines"], 20)                 # the robot shape is drawn without a robot
+        self.assertFalse(v["bannerHidden"])
+        self.assertIn("연결 전", v["banner"])
+        self.assertIn("90/45/90", v["banner"])
+        self.assertEqual(v["joints"].count("<td>-</td>"), 20)   # no joint values are claimed as live
+        self.assertTrue(self.f["connected"]["bannerHidden"])  # real data replaces it once connected
+        self.assertIn("<td>90</td>", self.f["connected"]["joints"])
+
+    def test_pin_card_lists_esp32_hardware(self):
+        v = self.f["initial"]
+        self.assertFalse(v["pinCardHidden"])
+        self.assertTrue(self.framed["pinCardHidden"])          # the outer page already shows it
+        for text in ("MPU9250", "INA219", "SDA = GPIO21", "SCL = GPIO22", "ALPHA = GPIO25", "GAMMA = GPIO15", "VIN"):
+            self.assertIn(text, v["pinBody"])
+        self.assertEqual(v["pinSvg"].count("<circle"), 30)    # every header pin of the 30-pin board
+
+    def test_pin_card_matches_firmware_servo_pins(self):
+        fw = (ROOT / "esp32-robot-dog-code-master" / "tools" / "servoInitPose" / "servoInitPose.ino").read_text(encoding="utf-8")
+        table = fw[fw.index("ServoConfig servos[] = {"):]
+        table = table[:table.index("};")]
+        gpios = [int(n) for n in re.findall(r"\{\s*(\d+),", table)]
+        self.assertEqual(len(gpios), 12)
+        page = PAGE.read_text(encoding="utf-8")
+        legs = {}
+        for leg in ("LF", "RF", "LH", "RH"):                  # firmware order: LF, RF, LH, RH x ALPHA, BETA, GAMMA
+            m = re.search(r'id: "' + leg + r'".*?pins: \[\["ALPHA", "(\d+)"\], \["BETA", "(\d+)"\], \["GAMMA", "(\d+)"\]\]', page, re.S)
+            legs[leg] = [int(x) for x in m.groups()]
+        self.assertEqual(legs["LF"] + legs["RF"] + legs["LH"] + legs["RH"], gpios)
+        imu = (ROOT / "esp32-robot-dog-code-master" / "tools" / "servoInitPose" / "imu_sensor.ino").read_text(encoding="utf-8")
+        self.assertIn("IMU_SDA_PIN = 21", imu)
+        self.assertIn("IMU_SCL_PIN = 22", imu)
+
+    def test_root_launcher_opens_the_page_file(self):
+        html = (ROOT / "robot_page.html").read_text(encoding="utf-8")
+        target = "esp32-robot-dog-code-master/software/robot_control_web/index.html"
+        self.assertIn('content="0; url=' + target + '"', html)
+        self.assertTrue((ROOT / target).is_file())
+        self.assertNotRegex(html, r"https?://")
 
     def test_starts_disconnected_and_opens_nothing_by_itself(self):
         v = self.f["initial"]

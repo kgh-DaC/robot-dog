@@ -289,7 +289,7 @@ if (MODE === "gateway") (async () => {
 if (MODE === "framed") (async () => {
   vm.runInContext(script, context);
   await advance(600);
-  process.stdout.write(JSON.stringify({ connCardHidden: el("connCard").hidden, armed: el("sArmed").textContent }));
+  process.stdout.write(JSON.stringify({ connCardHidden: el("connCard").hidden, pinCardHidden: el("pinCard").hidden, armed: el("sArmed").textContent }));
 })();
 
 if (MODE === "file-noserial") (async () => {
@@ -312,8 +312,10 @@ if (MODE === "file") (async () => {
     frameCardHidden: el("frameCard").hidden, localUiHidden: el("localUi").hidden, fetches: statusUrls.length + posts.length,
     serialRowHidden: el("serialRow").hidden, autoCardHidden: el("autoCard").hidden, joints: el("joints").innerHTML });
   vm.runInContext(script, context);
+  const lines0 = draw2.mdCanvas;
   await advance(800);
-  const f = { initial: Object.assign(view(), { serialHidden: el("cmSerial").hidden, usbHidden: el("cmUsb").hidden,
+  const f = { initial: Object.assign(view(), { mdLines: draw2.mdCanvas - lines0, bannerHidden: el("mdBanner").hidden,
+    banner: el("mdBanner").textContent, pinBody: el("pinBody").innerHTML, pinSvg: el("pinSvg").innerHTML, pinCardHidden: el("pinCard").hidden, serialHidden: el("cmSerial").hidden, usbHidden: el("cmUsb").hidden,
     offHidden: el("cmOff").hidden, serialDisabled: el("cmSerial").disabled, opens: fw.openCount }) };
   el("arm").onclick();                       // not connected: refused, nothing is written
   await advance(200);
@@ -322,7 +324,7 @@ if (MODE === "file") (async () => {
   fw.autoPhase = "WAITING";                  // the board has just booted and is about to walk by itself
   el("cmSerial").onclick();
   await advance(1500);
-  f.connected = Object.assign(view(), { requests: fw.requestCount, autoPhase: fw.autoPhase, log: sent(0).slice(0, 4),
+  f.connected = Object.assign(view(), { bannerHidden: el("mdBanner").hidden, requests: fw.requestCount, autoPhase: fw.autoPhase, log: sent(0).slice(0, 4),
     stops: sent(0).filter((l) => l === "WALK STOP").length, fwArmed: fw.armed });
 
   el("arm").onclick();
@@ -457,9 +459,10 @@ if (MODE === "robot") (async () => {
   gl3.report.off = { lastShown: fakeGl.shown[fakeGl.shown.length - 1], lines2d: draw2.mdCanvas - lines0, note: el("mdGlNote").textContent };
   el("mdGl").onclick();
   await advance(600);
-  statusMode = "fail";                    // stale pose: the 3D model must be hidden
+  statusMode = "fail";                    // stale pose: the initial pose is drawn, marked as not live
   await advance(2500);
-  gl3.report.stale = { lastShown: fakeGl.shown[fakeGl.shown.length - 1] };
+  gl3.report.stale = { lastShown: fakeGl.shown[fakeGl.shown.length - 1], last: fakeGl.draws[fakeGl.draws.length - 1],
+    bannerHidden: el("mdBanner").hidden, banner: el("mdBanner").textContent, joints: el("joints").innerHTML };
   statusMode = "ok";
   await advance(600);
   fakeGl.fail = true;                     // renderer breaks: fall back to 2D for good
