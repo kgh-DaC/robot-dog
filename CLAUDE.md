@@ -16,3 +16,17 @@
 | 2026-11-11 | 수평 유지 ON/OFF 비교 그래프·관절 기구학 모형 명세 추가, 현재 웹 구성 문서화 | digital-twin 스킬·에이전트, QA 에이전트, 오케스트레이터 | 사용자 요청 기능을 구현할 수 있도록 실제 작업 대상(robot_control_web, servoInitPose, usb_gateway)과 검증 기준을 하네스에 반영 |
 | 2026-11-11 | 루프 하네스 추가 (robot-dog-loop 스킬, 작업 목록·기록·시작 명령, 안전 훅) | `.claude/skills/robot-dog-loop`, `.claude/hooks`, `.claude/settings.json`, `_workspace/loop` | Ralph Loop로 작업 목록을 반복 처리하되 실물 동작은 사람 승인으로 남기기 위해 |
 | 2026-11-11 | 루프 시작 명령을 `/ralph-loop:ralph-loop`으로 정정, jq 필요 조건 추가, 안전 훅의 상태 파일 이름 수정(`ralph-loop.local.md`) | `_workspace/loop/LOOP_PROMPT.md`, `robot-dog-loop` 스킬, `loop_guard.py` | `/ralph-loop`이 Unknown command로 나옴. 플러그인 실제 동작이 도움말과 달랐음 |
+| 2026-11-13 | 세션 종료 규칙 추가 (종료 전 `_workspace/HANDOFF.md` 갱신·커밋) | `CLAUDE.md` | 다른 로그인으로도 이전 작업을 이어갈 수 있게 하기 위해 |
+
+
+## 세션 종료 규칙 (항상 지킬 것)
+작업을 마치거나 세션을 끝내기 전에는 **항상** 인수 문서 `_workspace/HANDOFF.md`를 최신 상태로 고친다. 다른 로그인(다른 계정·새 세션)은 이 대화 내용과 개인 메모리를 볼 수 없으므로, 이 문서만 읽고도 이어서 작업할 수 있어야 한다.
+- 담을 내용: 현재 상태(끝난 것·덜 끝난 것), 다음 할 일, 미해결 문제, 안전 규칙, 실행 명령, 파일 지도, 업로드·실물 시험 여부
+- 이번 세션에서 바뀐 점은 날짜(YYYY-MM-DD)와 함께 적는다
+- 메모리에만 있는 사실(예: 업로드 절차, 센서 특이사항)도 이어가기에 필요하면 문서에 옮겨 적는다
+- 비밀번호·토큰 같은 비밀 값은 적지 않는다
+- 문서를 고친 뒤 커밋해서 다른 로그인에서도 보이게 한다 (push는 사용자가 요청할 때만)
+
+## 진행 중 작업 (새 세션은 먼저 읽기)
+- **인수 문서: `_workspace/HANDOFF.md`** (현재 상태, 다음 할 일, 안전 규칙, 명령, 파일 지도)
+- USB/핫스팟 두 연결 모드: `_workspace/2026-11-13_hotspot-mode.md` (코드·QA·업로드 완료, 핫스팟 실물 미시험)
