@@ -93,6 +93,7 @@ input{font:inherit;border:1px solid var(--line);border-radius:10px;background:va
         <button id="cmSerial" hidden>USB 직렬 (브라우저)</button>
         <button id="cmUsb">USB 게이트웨이</button>
         <button id="cmHot">핫스팟 Wi-Fi</button>
+        <button id="cmSim" hidden>시뮬레이터</button>
         <button id="cmOff" hidden>연결 끊기</button>
       </div>
     </div>
@@ -102,6 +103,9 @@ input{font:inherit;border:1px solid var(--line);border-radius:10px;background:va
     </div>
     <div class="row" id="usbLinkRow" hidden style="margin-top:8px">
       <button id="usbLink">USB 연결 끊기</button>
+    </div>
+    <div class="row" id="hostedRow" hidden style="margin-top:8px">
+      <button id="hsOpen">로봇 페이지 새 탭으로 열기</button>
     </div>
     <div class="row" id="serialRow" hidden style="margin-top:8px">
       <button id="serialPick">다른 USB 포트 고르기</button>
@@ -334,10 +338,17 @@ input{font:inherit;border:1px solid var(--line);border-radius:10px;background:va
   // "serial" talks to the board through the browser's Web Serial API, and Wi-Fi
   // shows the robot's own page in a frame (same origin there, so no CORS and no
   // firmware change). It starts disconnected ("off") and connects only on a click.
-  var isFile = LOC.protocol === "file:";
+  // A copy published on an https site (e.g. GitHub Pages, the robot hub) behaves like a file: the robot
+  // itself only serves http, and the gateway is http://127.0.0.1. It can use Web Serial and the simulator;
+  // its Wi-Fi choice opens the robot's own page in a new tab (an https page cannot frame or call http).
+  var isHosted = LOC.protocol === "https:";
+  var isFile = LOC.protocol === "file:" || isHosted;
   var canSwitch = onGateway || isFile;
   var framed = false;        // this page is shown inside the local page's Wi-Fi frame
   try { framed = !!window.top && window.top !== window.self; } catch (e) { framed = true; }
+  // Only the robot-served copy inside a local page's Wi-Fi frame hides its own cards. A local or hosted copy
+  // inside another page (the robot hub) keeps them, since nothing outside shows them.
+  var nested = framed && !isFile;
   var conn = { mode: onGateway ? "usb" : isFile ? "off" : "hot", host: "" };   // host: Wi-Fi target (local pages only)
   var apiBase = "";          // "" = same origin as the page (relative URLs)
   var connGen = 0, pollCtrl = null, addrEdited = false, lastStaIp = "", cmdBusy = 0;
@@ -353,9 +364,12 @@ input{font:inherit;border:1px solid var(--line);border-radius:10px;background:va
   }
   function apiUrl(path) { return apiBase + path; }
   function noPoll() { return conn.mode === "off" || (isFile && conn.mode === "hot"); }
+  function linkOf(mode) { return mode === "serial" ? serial : mode === "sim" ? sim : null; }
   function targetText() {
     if (conn.mode === "off") return "연결 안 함";
     if (conn.mode === "serial") return "USB 직렬 포트 (브라우저가 직접 연결)";
+    if (conn.mode === "sim") return "시뮬레이터 (가상 로봇 — 실제 로봇에는 아무것도 보내지 않음)";
+    if (isHosted && conn.mode === "hot") return "http://" + conn.host + " (새 탭에서 로봇 페이지)";
     if (isFile) return "http://" + conn.host + " (아래에 로봇 페이지 표시)";
     if (!onGateway) return (LOC.host || "이 페이지") + " (로봇에서 열린 페이지)";
     return conn.mode === "usb" ? "USB 게이트웨이 → " + (state && state.serialPort ? state.serialPort : "직렬 포트")
@@ -757,11 +771,93 @@ input{font:inherit;border:1px solid var(--line);border-radius:10px;background:va
     };
   })();
 
+  // ---- simulator: a virtual robot with the same replies as the serial link -----------
+  // Follows the firmware rules (servoInitPose): explicit ARM, 1 s heartbeat lease (heartbeat_timeout),
+  // STOP always accepted, WALKHB only for the armed page. Joint angles follow setWalkingPose():
+  // stand 90/45/90 (RH ALPHA 86), stride BETA ±7, turn ALPHA ±4 / BETA +3, swing GAMMA −11,
+  // steps lift 350 ms / move 600 ms / lower 300 ms, swing pairs LF+RH then RF+LH.
+  var sim = (function () {
+    var LEGS = ["LF", "RF", "LH", "RH"], HOLD = [350, 600, 300];
+    var armed = false, owner = false, walk = "STOPPED", walkAt = 0, lastHb = 0, lastStop = "", bootAt = Date.now();
+    var level = false, autoOn = false;
+    function neutral(i) { return i === 9 ? 86 : i % 3 === 1 ? 45 : 90; }
+    function angles(now) {
+      var a = []; for (var i = 0; i < 12; i++) a.push(neutral(i));
+      if (walk !== "STOPPED") {
+        var t = now - walkAt, cycle = HOLD[0] + HOLD[1] + HOLD[2];
+        var phase = Math.floor(t / cycle) % 2, r = t % cycle;
+        var step = r < HOLD[0] ? 0 : r < HOLD[0] + HOLD[1] ? 1 : 2;
+        var fresh = t < cycle;
+        var pair = phase === 0 ? [0, 3] : [1, 2];              // LF+RH / RF+LH
+        var stride = walk === "BACKWARD" ? 7 : -7, side = walk === "LEFT" ? 4 : -4;
+        var straight = walk === "FORWARD" || walk === "BACKWARD";
+        for (var leg = 0; leg < 4; leg++) {
+          var base = leg * 3, swing = pair.indexOf(leg) >= 0;
+          var atSwingEnd = swing ? step >= 1 : step === 0;
+          if (!(fresh && step === 0)) {
+            var sign = atSwingEnd ? 1 : -1;
+            if (straight) a[base + 1] += sign * -stride;
+            else { a[base] += sign * side; a[base + 1] += sign * 3; }
+          }
+          if (swing && step < 2) a[base + 2] -= 11;
+        }
+      }
+      var out = {};
+      LEGS.forEach(function (n, leg) { out[n] = [a[leg * 3], a[leg * 3 + 1], a[leg * 3 + 2]]; });
+      return out;
+    }
+    function lease(now) {
+      if (armed && now - lastHb > 1000) { armed = false; owner = false; walk = "STOPPED"; lastStop = "heartbeat_timeout"; }
+    }
+    function status() {
+      var now = Date.now(); lease(now);
+      var n = function () { return Math.round((Math.random() - 0.5) * 6) / 10; };
+      var sway = walk !== "STOPPED" ? Math.sin(now / 300) * 2 : 0;
+      return Promise.resolve({ link: "sim", sim: true, connected: true, armed: armed, controller: armed ? "SIM" : "NONE",
+        youControl: armed && owner, walk: walk, homing: false, settled: walk === "STOPPED", resetReason: "SIM", lastStop: lastStop,
+        uptimeMs: now - bootAt, leaseTimeoutMs: 1000, angles: angles(now), wifi: null,
+        imu: { ready: true, chip: "SIM", whoAmI: "", address: "", valid: true, ageMs: 10, accG: { x: 0, y: 0, z: 1 },
+          axisDeg: { x: sway + n(), y: n() }, zeroed: true, rollMap: "X", pitchMap: "Y", rollDeg: sway + n(), pitchDeg: n() },
+        level: { enabled: level, active: level && armed, sensorUsable: true, rollCompDeg: 0, pitchCompDeg: 0,
+          gammaOffsetDeg: { LF: 0, RF: 0, LH: 0, RH: 0 }, maxCompDeg: 8, tiltLimitDeg: 20 },
+        autoWalk: { enabled: autoOn, phase: "IDLE", delayMs: 5000, runMs: 10000, blocked: false } });
+    }
+    function run(p) {
+      var now = Date.now(); lease(now);
+      var c = p.cmd;
+      if (c === "STOP") { walk = "STOPPED"; owner = false; armed = false; lastStop = ""; return; }
+      if (c === "ARM") { armed = true; owner = true; lastHb = now; lastStop = ""; return; }
+      if (c === "LEVEL") { if (p.on === "1" && !owner) throw "not_armed"; level = p.on === "1"; return; }
+      if (c === "AUTOWALK") { autoOn = p.on === "1"; return; }
+      if (c === "WIFI_SET" || c === "WIFI_CLEAR") throw "firmware_without_hotspot";
+      if (!owner || !armed) throw "not_armed";
+      if (c === "HB") { lastHb = now; return; }
+      if (c === "DISARM") { armed = false; owner = false; walk = "STOPPED"; return; }
+      if (c === "WALK") {
+        if (["FORWARD", "BACKWARD", "LEFT", "RIGHT", "STOP"].indexOf(p.dir) < 0) throw "invalid_direction";
+        lastHb = now;
+        var next = p.dir === "STOP" ? "STOPPED" : p.dir;
+        if (next !== walk) { walk = next; walkAt = now; }
+        return;
+      }
+      throw "unknown_command";
+    }
+    return {
+      supported: true,
+      reset: function () { armed = false; owner = false; walk = "STOPPED"; },
+      status: status,
+      command: function (params) {
+        try { run(params); return Promise.resolve({ ok: true }); }
+        catch (e) { return Promise.resolve({ ok: false, error: String(e) }); }
+      }
+    };
+  })();
+
   function setMsg(text, isErr) { $("msg").textContent = text || ""; $("msg").className = "msg" + (isErr ? " err" : ""); }
 
   function post(params, keepalive) {
     params.session = session;
-    if (conn.mode === "serial") return serial.command(params);
+    if (linkOf(conn.mode)) return linkOf(conn.mode).command(params);
     if (noPoll()) return Promise.resolve({ ok: false, error: "not_connected" });
     return fetch(apiUrl("api/command"), {
       method: "POST", keepalive: !!keepalive, cache: "no-store",
@@ -803,7 +899,7 @@ input{font:inherit;border:1px solid var(--line);border-radius:10px;background:va
     $("link").className = "badge " + (fresh ? "ok" : "bad");
     $("linkText").textContent = conn.mode === "off" ? "연결 안 함" : noPoll() ? "Wi-Fi (아래 로봇 페이지)" :
       !state ? (pollFails > 2 ? "응답 없음 (주소·연결 확인)" : "연결 확인 중") :
-      (state.direct ? "USB 직렬" : state.link === "usb" ? "USB 게이트웨이" : "ESP32 Wi-Fi") +
+      (state.sim ? "시뮬레이터" : state.direct ? "USB 직렬" : state.link === "usb" ? "USB 게이트웨이" : "ESP32 Wi-Fi") +
       (fresh ? " 연결됨" : state.released ? " 연결 끊음 (포트를 놓은 상태)" :
         state.error === "usb_connecting" ? " 연결 중" :
         state.connected && state.error ? " 응답 없음 (" + state.error + ")" : " 연결 끊김");
@@ -852,7 +948,7 @@ input{font:inherit;border:1px solid var(--line);border-radius:10px;background:va
     pollCtrl = ctrl;
     var gen = connGen;
     var timer = ctrl ? setTimeout(function () { ctrl.abort(); }, 1500) : null;
-    var request = conn.mode === "serial" ? serial.status()
+    var request = linkOf(conn.mode) ? linkOf(conn.mode).status()
       : fetch(apiUrl("api/status?session=" + session), { cache: "no-store", signal: ctrl ? ctrl.signal : undefined })
         .then(function (r) { return r.json(); });
     return request
@@ -876,8 +972,10 @@ input{font:inherit;border:1px solid var(--line);border-radius:10px;background:va
     var usbFresh = fresh && state.link === "usb";
     var sta = state && state.wifi && state.wifi.sta;
     if (usbFresh && sta && sta.status === "CONNECTED" && sta.ip) lastStaIp = sta.ip;
-    $("connCard").hidden = framed;      // inside the local page's frame the outer page has this card
-    $("cmSerial").hidden = $("cmOff").hidden = !isFile;
+    $("connCard").hidden = nested;      // inside the local page's frame the outer page has this card
+    $("cmSerial").hidden = $("cmOff").hidden = $("cmSim").hidden = !isFile;
+    $("cmSim").classList.toggle("on", conn.mode === "sim");
+    $("hostedRow").hidden = !(isHosted && conn.mode === "hot");
     $("cmUsb").hidden = isFile;
     $("cmSerial").disabled = !serial.supported;
     $("cmSerial").classList.toggle("on", conn.mode === "serial");
@@ -885,7 +983,7 @@ input{font:inherit;border:1px solid var(--line);border-radius:10px;background:va
     if (isFile) $("cmHot").textContent = "Wi-Fi";
     $("serialRow").hidden = !(isFile && conn.mode === "serial");
     $("serialPick").disabled = cmdBusy > 0;
-    var frameHost = isFile && conn.mode === "hot" ? conn.host : "";
+    var frameHost = isFile && !isHosted && conn.mode === "hot" ? conn.host : "";
     $("frameCard").hidden = !frameHost;
     $("localUi").hidden = !!frameHost;
     if (frameHost !== shownFrame) {     // leaving: the framed page stops the robot on its own pagehide
@@ -900,8 +998,10 @@ input{font:inherit;border:1px solid var(--line);border-radius:10px;background:va
     $("connNote").textContent = isFile
       ? (conn.mode === "serial" ? "브라우저가 USB 직렬 포트를 직접 엽니다 (게이트웨이 프로그램 불필요). 포트는 한 프로그램만 쓸 수 있으니 게이트웨이·노트북·시리얼 모니터는 닫으세요. 다른 연결로 바꾸거나 “연결 끊기”를 누르면 로봇을 정지시킨 뒤 포트를 닫습니다." +
           (lastStaIp ? " 로봇이 핫스팟에 연결되어 있습니다 (" + lastStaIp + ")." : "")
+        : conn.mode === "sim" ? "시뮬레이터: 실제 로봇 없이 가상 로봇이 펌웨어 규칙(활성화, 1초 하트비트 리스, 정지 우선)대로 응답합니다. 관절 모형이 보행 자세를 따라 움직입니다."
+        : conn.mode === "hot" && isHosted ? "온라인(https) 페이지에서는 로봇(http) 페이지를 이 안에 띄울 수 없습니다. 이 기기를 로봇 Wi-Fi(RobotDog-…)에 연결한 뒤 “로봇 페이지 새 탭으로 열기”를 누르세요. 다른 Wi-Fi에서 열면 빈 화면으로 계속 로딩됩니다."
         : conn.mode === "hot" ? "로봇이 Wi-Fi로 보낸 페이지를 아래에 그대로 보여 줍니다. 조종과 긴급 정지는 아래 페이지에서 합니다."
-        : (serial.supported ? "USB 직렬 또는 Wi-Fi를 고르세요. Wi-Fi는 주소(로봇 자체 Wi-Fi는 192.168.4.1)를 확인하고 누릅니다."
+        : (serial.supported ? "USB 직렬, Wi-Fi, 시뮬레이터 중에서 고르세요. Wi-Fi는 주소(로봇 자체 Wi-Fi는 192.168.4.1)를 확인하고 누릅니다."
           : "이 브라우저는 USB 직렬 연결을 지원하지 않습니다 (PC의 Chrome·Edge 필요). Wi-Fi 연결은 쓸 수 있습니다."))
       : !onGateway
       ? "이 페이지는 로봇이 직접 보냈습니다 (로봇 Wi-Fi 또는 핫스팟). USB로 쓰려면 노트북에서 http://127.0.0.1:8787 을 여세요."
@@ -956,12 +1056,16 @@ input{font:inherit;border:1px solid var(--line);border-radius:10px;background:va
         setMsg(settled ? "로봇을 정지시키고 USB 직렬 포트를 닫았습니다." : "USB 직렬 포트를 닫았습니다. (정지 자세 저장은 확인하지 못했습니다)", !settled);
       });
     }
+    if (was === "sim" && mode !== "sim") sim.reset();
+    if (mode === "sim" && was !== "sim") { sim.reset(); setMsg("시뮬레이터에 연결했습니다. 움직이려면 활성화하세요."); }
     if (mode === "serial" && (pick || !serial.isOpen())) openSerial(pick);
     poll();
     render();
   }
   $("cmSerial").onclick = function () { switchConn("serial"); };
   $("cmOff").onclick = function () { switchConn("off"); };
+  $("cmSim").onclick = function () { switchConn("sim"); };
+  $("hsOpen").onclick = function () { window.open("http://" + (conn.host || "192.168.4.1") + "/", "_blank", "noopener"); };
   $("serialPick").onclick = function () {
     if (isFresh(3000) && state.armed && state.youControl) { setMsg("움직임이 활성화된 동안에는 포트를 바꿀 수 없습니다. 먼저 정지하세요.", true); return; }
     if (cmdBusy) return;
@@ -1542,7 +1646,7 @@ input{font:inherit;border:1px solid var(--line);border-radius:10px;background:va
     return out.join("");
   }
   function renderPins() {
-    $("pinCard").hidden = framed;      // the outer local page already shows this card
+    $("pinCard").hidden = nested;      // the outer local page already shows this card
     $("pinBody").innerHTML = PINMAP.map(function (g) {
       return '<tr><td><span class="sw" style="background:' + g.color + '"></span>' + g.name + "</td><td>" + g.term +
         '</td><td class="pn">' + g.pins.map(pinText).join("<br>") + "</td><td>" + g.note + "</td></tr>";

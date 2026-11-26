@@ -133,3 +133,10 @@ arduino-cli compile --fqbn esp32:esp32:esp32 --warnings default .
 - `_workspace/2026-11-11_twin-features/`, `_workspace/2026-11-09_web-control/`: 관절 모형·수평 비교, 웹 제어 초기 설계
 - `_workspace/loop/LOG.md`: 루프 L1~L8 기록
 - 커밋 기록: `git log --oneline`
+
+## 2026-11-27 (통합 허브 세션, 사용자 요청)
+- 제어 웹(`software/robot_control_web/index.html`): **https로 올라간 사본(GitHub Pages·통합 허브)**을 file:// 처럼 "이 컴퓨터의 페이지"로 다룸 → 연결 방법에 **USB 직렬 (브라우저) / Wi-Fi / 시뮬레이터 / 연결 끊기**. https에서 Wi-Fi는 로봇(http) 페이지를 안에 띄울 수 없어 "로봇 페이지 새 탭으로 열기" 버튼으로 연다.
+- **시뮬레이터 추가**: serial 과 같은 status()/command() 계약의 가상 로봇. ARM 필요, 1초 하트비트 리스(heartbeat_timeout), STOP 우선, 관절 각도는 setWalkingPose() 규칙(서 있는 자세 90/45/90·RH 86, 보폭 BETA ±7, 회전 ALPHA ±4/BETA +3, 다리 들기 GAMMA −11, 350/600/300ms).
+- 다른 페이지(허브) 안의 iframe이어도 로컬·https 사본은 연결 카드·핀 카드를 숨기지 않음(숨김은 로봇이 보낸 사본이 로컬 페이지 Wi-Fi 프레임 안에 있을 때만).
+- `embed_page.py`로 `tools/servoInitPose/web_page.h` 재생성(로봇이 보내는 사본은 동작 변화 없음, 시뮬레이터 버튼 숨김). **펌웨어 재업로드는 안 함**(필요 시 다음 업로드 때 반영).
+- 시험: pytest 153 통과, 헤드리스 Edge(file://) 시뮬레이터 연결·활성화·전진·정지 확인.
