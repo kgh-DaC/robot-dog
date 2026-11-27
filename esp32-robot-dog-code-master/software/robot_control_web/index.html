@@ -72,7 +72,7 @@ input{font:inherit;border:1px solid var(--line);border-radius:10px;background:va
 #localUi{display:grid;gap:14px;min-width:0}
 .mdBanner{position:absolute;left:8px;top:8px;z-index:2;max-width:calc(100% - 16px);background:var(--card);border:1px solid var(--warn);color:var(--warn);border-radius:8px;padding:4px 8px;font-size:12px;pointer-events:none}
 .chartwrap.initial canvas{opacity:.62}
-.pinsvg{width:100%;max-width:560px;height:auto;display:block;margin:6px auto}
+.pinsvg{width:100%;max-width:900px;height:auto;display:block;margin:6px auto}
 #pinLegend{flex-wrap:wrap;gap:6px 14px}
 .pintable th,.pintable td{text-align:left;vertical-align:top}
 .pintable td.pn{font-family:ui-monospace,Consolas,monospace;white-space:nowrap}
@@ -274,13 +274,13 @@ input{font:inherit;border:1px solid var(--line);border-radius:10px;background:va
 
   <section class="card" id="pinCard">
     <div class="lvhead">
-      <h2>ESP32 핀 연결 (하드웨어 정보)</h2>
-      <span class="note">ESP32 DevKit V1 30핀 · 안테나가 위쪽</span>
+      <h2>핀 연결 (로봇개 메인 보드 + ESP32)</h2>
+      <span class="note">메인 보드 robotdog_main 50×70 mm · ESP32 DevKit V1 30핀(안테나 위쪽)을 꽂음</span>
     </div>
-    <svg id="pinSvg" class="pinsvg" viewBox="0 0 560 590" role="img" aria-label="ESP32 30핀 보드에서 쓰는 핀 배치도"></svg>
+    <svg id="pinSvg" class="pinsvg" viewBox="0 0 900 620" role="img" aria-label="로봇개 메인 보드와 ESP32 30핀 보드의 핀 배치도"></svg>
     <div class="legend" id="pinLegend"></div>
     <div class="scroll"><table class="pintable">
-      <thead><tr><th>부품·기능</th><th>부품 단자</th><th>ESP32 핀</th><th>비고</th></tr></thead>
+      <thead><tr><th>부품·기능</th><th>부품 단자</th><th>기판 단자</th><th>ESP32 핀</th><th>비고</th></tr></thead>
       <tbody id="pinBody"></tbody>
     </table></div>
     <p class="note" id="pinNote" style="margin-top:8px"></p>
@@ -1586,29 +1586,38 @@ input{font:inherit;border:1px solid var(--line);border-radius:10px;background:va
       canvas.addEventListener("pointerleave", function () { cmp.hover = null; render(); });
     });
   })();
-  // ---- ESP32 pin map (bottom card) -----------------------------------------
+  // ---- Pin map (bottom card): robot dog main board (hardware/pcb) + ESP32 30-pin ------------
   // Servo GPIOs are the firmware defaults (servoInitPose.ino servos[], checked by a test).
-  // Header order: ESP32 DevKit V1 30-pin, antenna up (hardware/pcb/README.md).
+  // Board layout follows hardware/pcb/out/robotdog_main_top.png (50 x 70 mm, mm coordinates below).
+  // ESP32 header order: DevKit V1 30-pin, antenna up (hardware/pcb/README.md).
   var PIN_LEFT = ["EN", "VP", "VN", "34", "35", "32", "33", "25", "26", "27", "14", "12", "13", "GND", "VIN"];
   var PIN_RIGHT = ["23", "22", "TX", "RX", "21", "19", "18", "5", "17", "16", "4", "2", "15", "GND", "3V3"];
-  var SERVO_NOTE = "서보 3핀: 신호(S) · + · -(갈색). ALPHA = 어깨(안팎), BETA = 윗다리(앞뒤), GAMMA = 무릎";
+  var SERVO_NOTE = "서보 헤더는 안쪽(ESP32 쪽)부터 S(신호) · + · -이고 서보의 갈색(검은색) 선이 바깥쪽 -로 갑니다. ALPHA = 어깨(안팎), BETA = 윗다리(앞뒤), GAMMA = 무릎";
   var PINMAP = [
-    { id: "LF", short: "LF", name: "왼앞 다리(LF) 서보 ×3", color: "#2a78d6", term: "서보 신호선",
-      pins: [["ALPHA", "25"], ["BETA", "26"], ["GAMMA", "27"]], note: "서보 전원: 왼쪽 Mini360 6 V" },
-    { id: "LH", short: "LH", name: "왼뒤 다리(LH) 서보 ×3", color: "#1f9e89", term: "서보 신호선",
-      pins: [["ALPHA", "13"], ["BETA", "12"], ["GAMMA", "14"]], note: "서보 전원: 왼쪽 Mini360 6 V. GPIO12는 부팅 스트래핑 핀(부팅 순간 HIGH로 끌리면 부팅 실패 가능)" },
-    { id: "RF", short: "RF", name: "오른앞 다리(RF) 서보 ×3", color: "#eb6834", term: "서보 신호선",
-      pins: [["ALPHA", "16"], ["BETA", "18"], ["GAMMA", "17"]], note: "서보 전원: 오른쪽 Mini360 6 V" },
-    { id: "RH", short: "RH", name: "오른뒤 다리(RH) 서보 ×3", color: "#c2489c", term: "서보 신호선",
-      pins: [["ALPHA", "4"], ["BETA", "2"], ["GAMMA", "15"]], note: "서보 전원: 오른쪽 Mini360 6 V. GPIO2·15는 부팅 스트래핑 핀. RH ALPHA 초기값 86°" },
+    { id: "LF", short: "LF", name: "왼앞 다리(LF) 서보 ×3", color: "#2a78d6", term: "서보 3핀 커넥터",
+      pins: [["ALPHA", "25"], ["BETA", "26"], ["GAMMA", "27"]], hdr: ["왼쪽 헤더 A25", "왼쪽 헤더 B26", "왼쪽 헤더 G27"],
+      note: "서보 전원: PS2(왼쪽 Mini360 6 V)" },
+    { id: "LH", short: "LH", name: "왼뒤 다리(LH) 서보 ×3", color: "#1f9e89", term: "서보 3핀 커넥터",
+      pins: [["ALPHA", "13"], ["BETA", "12"], ["GAMMA", "14"]], hdr: ["왼쪽 헤더 A13", "왼쪽 헤더 B12", "왼쪽 헤더 G14"],
+      note: "서보 전원: PS2(왼쪽 Mini360 6 V). GPIO12는 부팅 스트래핑 핀(부팅 순간 HIGH로 끌리면 부팅 실패 가능)" },
+    { id: "RF", short: "RF", name: "오른앞 다리(RF) 서보 ×3", color: "#eb6834", term: "서보 3핀 커넥터",
+      pins: [["ALPHA", "16"], ["BETA", "18"], ["GAMMA", "17"]], hdr: ["오른쪽 헤더 A16", "오른쪽 헤더 B18", "오른쪽 헤더 G17"],
+      note: "서보 전원: PS3(오른쪽 Mini360 6 V). B18과 G17 사이 한 칸(GPIO5)은 비어 있음" },
+    { id: "RH", short: "RH", name: "오른뒤 다리(RH) 서보 ×3", color: "#c2489c", term: "서보 3핀 커넥터",
+      pins: [["ALPHA", "4"], ["BETA", "2"], ["GAMMA", "15"]], hdr: ["오른쪽 헤더 A4", "오른쪽 헤더 B2", "오른쪽 헤더 G15"],
+      note: "서보 전원: PS3(오른쪽 Mini360 6 V). GPIO2·15는 부팅 스트래핑 핀. RH ALPHA 초기값 86°" },
     { id: "imu", short: "IMU", name: "MPU9250 호환 IMU (I2C 0x68)", color: "#8a6fdc", term: "SDA · SCL · VCC(3V3) · GND · AD0→GND",
-      pins: [["SDA", "21"], ["SCL", "22"]], note: "기울기(roll/pitch) 측정, 수평 유지·20° 기울기 정지에 사용. 실제 칩은 WHO_AM_I 0x75인 호환품. INA219와 I2C 버스 공유(400 kHz)" },
+      pins: [["SDA", "21"], ["SCL", "22"]], hdr: ["U2 MPU9250 SDA", "U2 MPU9250 SCL"],
+      note: "기판에 바로 납땜(ESP32 아래). 기울기(roll/pitch) 측정, 수평 유지·20° 기울기 정지에 사용. 실제 칩은 WHO_AM_I 0x75인 호환품. INA219와 I2C 버스 공유(400 kHz). 기판에서는 방향이 바뀌므로 축 설정·영점을 다시 잡아야 함" },
     { id: "ina", short: "INA", name: "INA219 전류·전압 센서 (I2C 0x40)", color: "#6b8e23", term: "SDA · SCL · VCC(3V3) · GND · VIN+ / VIN-",
-      pins: [["SDA", "21"], ["SCL", "22"]], note: "배터리 + → 스위치 → VIN+ → 션트 → VIN- → Mini360 3개. 배선만 되어 있고 지금 펌웨어(servoInitPose)는 값을 읽지 않음" },
+      pins: [["SDA", "21"], ["SCL", "22"]], hdr: ["U3 INA219 SDA", "U3 INA219 SCL"],
+      note: "기판에 바로 납땜(나사 단자 없음). 배터리 + → 스위치 → J1 + → VIN+ → 션트 → VIN- → Mini360 3개. 지금 펌웨어(servoInitPose)는 값을 읽지 않음" },
     { id: "usb", short: "USB", name: "USB 직렬 (CP210x)", color: "#b08900", term: "보드 USB 단자",
-      pins: [["TX", "TX"], ["RX", "RX"]], note: "GPIO1(TX)·GPIO3(RX). 펌웨어 업로드, 브라우저 직접 USB 연결, USB 게이트웨이. 다른 용도로 쓰지 않음" },
-    { id: "pwr", short: "전원", name: "전원 (2×18650 → Mini360)", color: "#c62828", term: "Mini360 5.2 V 출력 · 3V3 출력 · GND",
-      pins: [["5.2V 입력", "VIN"], ["3V3 출력", "3V3"], ["GND", "GND"]], note: "ESP32용 Mini360 5.2 V → VIN. 3V3 → IMU·INA219 VCC. 서보는 별도 Mini360 2개(왼쪽 6개·오른쪽 6개, 각 6 V). 모든 GND 공통" }
+      pins: [["TX", "TX"], ["RX", "RX"]], hdr: ["ESP32 보드 USB 단자", "ESP32 보드 USB 단자"],
+      note: "GPIO1(TX)·GPIO3(RX). 펌웨어 업로드, 브라우저 직접 USB 연결, USB 게이트웨이. 다른 용도로 쓰지 않음" },
+    { id: "pwr", short: "전원", name: "전원 (2×18650 → J1 → Mini360)", color: "#c62828", term: "Mini360 5.2 V 출력 · 3V3 출력 · GND",
+      pins: [["5.2V 입력", "VIN"], ["3V3 출력", "3V3"], ["GND", "GND"]], hdr: ["PS1 Mini360 OUT+ → VIN", "U2·U3 VCC", "J1 - (공통 GND)"],
+      note: "PS1 5.2 V → ESP32 VIN(C1 470 µF). 3V3 → IMU·INA219 VCC. 서보는 PS2(왼쪽 6개)·PS3(오른쪽 6개) 각 6 V, C2·C3 1000 µF. 모든 GND 공통" }
   ];
   function pinUsers(label) {
     var out = [];
@@ -1616,47 +1625,157 @@ input{font:inherit;border:1px solid var(--line);border-radius:10px;background:va
     return out;
   }
   function pinText(p) { return /^\d+$/.test(p[1]) ? p[0] + " = GPIO" + p[1] : p[0] + " = " + p[1]; }
+  function pinGroup(id) { for (var i = 0; i < PINMAP.length; i++) if (PINMAP[i].id === id) return PINMAP[i]; return null; }
   function pinSvg() {
-    var W = 560, x0 = 215, x1 = 345, y0 = 130, dy = 30, out = [];
-    var t = function (x, y, text, anchor, style) {
-      return '<text x="' + x + '" y="' + y + '" text-anchor="' + anchor + '" dominant-baseline="middle" style="' + style + '">' + text + "</text>";
+    // mm on the board -> px in the SVG
+    var S = 8, X0 = 250, Y0 = 46, out = [];
+    var X = function (mm) { return +(X0 + mm * S).toFixed(1); }, Y = function (mm) { return +(Y0 + mm * S).toFixed(1); };
+    var SILK = "#e9f2ea", DIM = "#9cc5a8", GOLD = "#d4a64a", PLUS = "#e03131", MINUS = "#2b2f33";
+    var t = function (x, y, text, anchor, style, extra) {
+      return '<text x="' + x + '" y="' + y + '" text-anchor="' + anchor + '" dominant-baseline="middle" style="' + style + '"' + (extra || "") + ">" + text + "</text>";
     };
-    out.push('<rect x="190" y="20" width="180" height="560" rx="10" style="fill:var(--bg);stroke:var(--line);stroke-width:2"/>');
-    out.push('<rect x="220" y="30" width="120" height="60" rx="4" style="fill:none;stroke:var(--muted);stroke-dasharray:4 3"/>');
-    out.push(t(280, 60, "안테나", "middle", "fill:var(--muted);font-size:12px"));
-    out.push('<rect x="252" y="250" width="56" height="120" rx="4" style="fill:var(--card);stroke:var(--line)"/>');
-    out.push(t(280, 300, "ESP32", "middle", "fill:var(--ink);font-size:13px;font-weight:600"));
-    out.push(t(280, 320, "WROOM", "middle", "fill:var(--muted);font-size:10px"));
-    out.push('<rect x="255" y="555" width="50" height="22" rx="3" style="fill:var(--card);stroke:var(--muted)"/>');
-    out.push(t(280, 566, "USB", "middle", "fill:var(--muted);font-size:11px"));
-    [[PIN_LEFT, x0, -1], [PIN_RIGHT, x1, 1]].forEach(function (col) {
+    var halo = "paint-order:stroke;stroke:#1d5b3a;stroke-width:3px;";
+    var box = function (x1, y1, x2, y2, dash) {
+      return '<rect x="' + X(x1) + '" y="' + Y(y1) + '" width="' + (X(x2) - X(x1)) + '" height="' + (Y(y2) - Y(y1)) +
+        '" style="fill:none;stroke:' + SILK + ';stroke-width:1.2' + (dash ? ";stroke-dasharray:5 4;stroke:#7fc4ff" : "") + '"/>';
+    };
+    var pad = function (x, y, fill, tip) {      // square pad (the 30 round pads are the ESP32 header only)
+      return "<g><title>" + tip + '</title><rect x="' + (X(x) - 6) + '" y="' + (Y(y) - 6) + '" width="12" height="12" rx="2" style="fill:' + fill + ';stroke:#0b2a1a;stroke-width:1"/></g>';
+    };
+    var ring = function (x, y, r) {            // capacitor / mounting hole outline (ellipse keeps the circle count = ESP32 pins)
+      return '<ellipse cx="' + X(x) + '" cy="' + Y(y) + '" rx="' + r * S + '" ry="' + r * S + '" style="fill:none;stroke:' + SILK + ';stroke-width:1.2"/>';
+    };
+    var espY = function (i) { return 7.5 + i * 2.54; };
+
+    // board
+    out.push('<rect x="' + X(0) + '" y="' + Y(0) + '" width="' + 50 * S + '" height="' + 70 * S + '" rx="12" style="fill:#1d5b3a;stroke:#3f8f5f;stroke-width:2"/>');
+    [[3.5, 3.5], [46.5, 3.5], [3.5, 66.5]].forEach(function (h) {
+      out.push('<ellipse cx="' + X(h[0]) + '" cy="' + Y(h[1]) + '" rx="15" ry="15" style="fill:#0b2a1a;stroke:' + SILK + '"/>');
+    });
+    out.push(t(X(25), Y(-2.6), "robotdog_main 메인 보드 (50 × 70 mm)", "middle", "fill:var(--ink);font-size:12px;font-weight:600"));
+
+    // capacitors, power modules, battery terminal
+    out.push(ring(5, 15, 4.2) + t(X(5), Y(9), "C2", "middle", "fill:" + SILK + ";font-size:11px;font-weight:700"));
+    out.push(ring(45, 15, 4.2) + t(X(45), Y(9), "C3", "middle", "fill:" + SILK + ";font-size:11px;font-weight:700"));
+    out.push(box(0.5, 40.8, 11, 58) + t(X(5.75), Y(47.5), "PS2 6V", "middle", "fill:" + SILK + ";font-size:11px;font-weight:700") +
+      t(X(5.75), Y(50), "왼쪽 서보", "middle", "fill:" + DIM + ";font-size:9px"));
+    out.push(box(39, 40.8, 49.5, 58) + t(X(44.25), Y(47.5), "PS3 6V", "middle", "fill:" + SILK + ";font-size:11px;font-weight:700") +
+      t(X(44.25), Y(50), "오른쪽 서보", "middle", "fill:" + DIM + ";font-size:9px"));
+    out.push(t(X(5.75), Y(59.6), "A:ALPHA", "middle", "fill:" + SILK + ";font-size:9px") + t(X(5.75), Y(61.3), "B:BETA", "middle", "fill:" + SILK + ";font-size:9px") +
+      t(X(5.75), Y(63), "G:GAMMA", "middle", "fill:" + SILK + ";font-size:9px"));
+    out.push(box(39.8, 62.8, 46.8, 69.5) + pad(41.3, 66.5, PLUS, "J1 + : 배터리 + (스위치 거쳐서)") + pad(43.8, 66.5, MINUS, "J1 - : 배터리 - (GND)") +
+      t(X(41.3), Y(64), "+", "middle", "fill:" + SILK + ";font-size:11px;font-weight:700") + t(X(43.8), Y(64), "-", "middle", "fill:" + SILK + ";font-size:11px;font-weight:700") +
+      t(X(43.3), Y(68.6), "J1 BAT", "middle", "fill:" + SILK + ";font-size:9px;font-weight:700"));
+
+    // INA219 (U3)
+    out.push(box(12.2, 49.5, 37.8, 69.5) + t(X(25), Y(62), "INA219 (U3)", "middle", "fill:" + SILK + ";font-size:13px;font-weight:700") +
+      t(X(25), Y(64.6), "나사 단자 없음", "middle", "fill:" + DIM + ";font-size:9px"));
+    var ina = pinGroup("ina"), pw = pinGroup("pwr");
+    [["VCC", pw.color, "3V3"], ["GND", MINUS, "GND"], ["SCL", ina.color, "GPIO22"], ["SDA", ina.color, "GPIO21"], ["VIN-", PLUS, "Mini360 3개 입력"], ["VIN+", PLUS, "J1 +"]]
+      .forEach(function (p, i) {
+        var x = 18.7 + i * 2.54;
+        out.push(pad(x, 51.5, p[1], "INA219 " + p[0] + " → " + p[2]) +
+          t(X(x), Y(55.2), p[0], "middle", "fill:" + SILK + ";font-size:9px;font-weight:700", ' transform="rotate(-90 ' + X(x) + " " + Y(55.2) + ')"'));
+      });
+
+    // PS1 + C1 (under the ESP32)
+    out.push(box(15, 30.5, 32.5, 41.7) + t(X(23.75), Y(35), "PS1 5.2V", "middle", "fill:" + SILK + ";font-size:12px;font-weight:700") +
+      t(X(23.75), Y(37.3), "→ ESP32 VIN", "middle", "fill:" + DIM + ";font-size:9px"));
+    out.push(pad(16.2, 32, MINUS, "PS1 OUT- (GND)") + pad(31, 32, MINUS, "PS1 IN- (GND)") + pad(16.2, 40, pw.color, "PS1 OUT+ 5.2 V → VIN") + pad(31, 40, PLUS, "PS1 IN+ ← INA219 VIN-"));
+    out.push('<polyline points="' + X(16.2) + "," + Y(40) + " " + X(16.2) + "," + Y(43.06) + " " + X(12.3) + "," + Y(43.06) +
+      '" style="fill:none;stroke:' + pw.color + ';stroke-width:3;opacity:.8"/>');
+    out.push(ring(17.8, 45.6, 2.6) + t(X(21.6), Y(45.6), "C1", "middle", "fill:" + SILK + ";font-size:9px"));
+
+    // MPU9250 (U2)
+    var imu = pinGroup("imu");
+    out.push(box(17.2, 4, 32.8, 29.7) + t(X(22), Y(16.5), "MPU9250", "middle", "fill:" + SILK + ";font-size:12px;font-weight:700") +
+      t(X(22), Y(18.8), "(U2)", "middle", "fill:" + DIM + ";font-size:9px") + t(X(22), Y(23.5), "AD0=GND", "middle", "fill:" + SILK + ";font-size:9px;font-weight:700"));
+    ["VCC", "GND", "SCL", "SDA", "EDA", "ECL", "AD0", "INT", "NCS", "FSY"].forEach(function (n, i) {
+      var y = 5.4 + i * 2.59, fill = n === "VCC" ? pw.color : n === "GND" || n === "AD0" ? MINUS : n === "SCL" || n === "SDA" ? imu.color : "#6c7a70";
+      var tip = "MPU9250 " + n + (n === "VCC" ? " ← 3V3" : n === "SCL" ? " → GPIO22" : n === "SDA" ? " → GPIO21" : n === "AD0" ? " → GND (주소 0x68)" : n === "GND" ? "" : " (연결 안 함)");
+      out.push(pad(31.5, y, fill, tip) + t(X(30.2), Y(y), n, "end", "fill:" + SILK + ";font-size:9px;font-weight:700"));
+    });
+
+    // ESP32 DevKit (dashed: it plugs into female headers above U2/PS1)
+    out.push('<rect x="' + X(11) + '" y="' + Y(-1.2) + '" width="' + 28 * S + '" height="' + 48.6 * S + '" rx="4" style="fill:none;stroke:#7fc4ff;stroke-width:1.2;stroke-dasharray:5 4"/>');
+    out.push(t(X(25), Y(1.4), "ESP32 DevKit 30핀 (안테나 ↑, 암 헤더에 꽂음)", "middle", "fill:#7fc4ff;font-size:9.5px;font-weight:600"));
+    out.push('<rect x="' + X(22.5) + '" y="' + Y(46) + '" width="' + 5 * S + '" height="' + 2.6 * S + '" rx="2" style="fill:#c9ced6;stroke:#555"/>' +
+      t(X(25), Y(47.3), "USB", "middle", "fill:#222;font-size:9px;font-weight:700"));
+
+    // servo headers: inner S, then +, outer -; S pad sits on the same row as its GPIO
+    var LEFT_ROWS = [[7, "A25", "LF"], [8, "B26", "LF"], [9, "G27", "LF"], [10, "G14", "LH"], [11, "B12", "LH"], [12, "A13", "LH"]];
+    var RIGHT_ROWS = [[6, "B18", "RF"], [7, "", ""], [8, "G17", "RF"], [9, "A16", "RF"], [10, "A4", "RH"], [11, "B2", "RH"], [12, "G15", "RH"]];
+    [[LEFT_ROWS, 7.7, 5.2, 2.6, 12.3, 10, -1], [RIGHT_ROWS, 42.3, 44.9, 47.4, 37.7, 40, 1]].forEach(function (side) {
+      var rows = side[0], xs = side[1], xp = side[2], xm = side[3], xe = side[4], xl = side[5], dir = side[6];
+      var yTop = espY(rows[0][0]) - 2.7;
+      out.push(t(X(xs), Y(yTop), "S", "middle", "fill:" + SILK + ";font-size:11px;font-weight:700") +
+        t(X(xp), Y(yTop), "+", "middle", "fill:" + SILK + ";font-size:11px;font-weight:700") +
+        t(X(xm), Y(yTop), "-", "middle", "fill:" + SILK + ";font-size:11px;font-weight:700"));
+      rows.forEach(function (r) {
+        var y = espY(r[0]), g = r[2] ? pinGroup(r[2]) : null;
+        if (g) out.push('<line x1="' + X(xs) + '" y1="' + Y(y) + '" x2="' + X(xe) + '" y2="' + Y(y) + '" style="stroke:' + g.color + ';stroke-width:3;opacity:.85"/>');
+        var who = g ? g.short + " " + { A: "ALPHA", B: "BETA", G: "GAMMA" }[r[1][0]] + " = GPIO" + r[1].slice(1) : "빈 칸 (GPIO5 줄, 연결 없음)";
+        out.push(pad(xs, y, g ? g.color : "#6c7a70", who + " · S(신호)") + pad(xp, y, g ? PLUS : "#6c7a70", who + " · +") + pad(xm, y, g ? MINUS : "#6c7a70", who + " · -"));
+        if (g) out.push(t(X(xl), Y(y), r[1], "middle", halo + "fill:#fff;font-size:9.5px;font-weight:700"));
+      });
+      out.push('<line x1="' + X(dir < 0 ? 0.4 : 46) + '" y1="' + Y(31.65) + '" x2="' + X(dir < 0 ? 4 : 49.6) + '" y2="' + Y(31.65) + '" style="stroke:' + SILK + ';stroke-width:1.5"/>');
+    });
+
+    // ESP32 header: 30 round pins, colored by the part that uses them
+    [[PIN_LEFT, 12.3, 13.6, "start"], [PIN_RIGHT, 37.7, 36.4, "end"]].forEach(function (col) {
       col[0].forEach(function (label, i) {
-        var y = y0 + i * dy, users = pinUsers(label), c = users.length ? users[0].g.color : "";
-        out.push('<circle cx="' + col[1] + '" cy="' + y + '" r="8" style="' +
-          (c ? "fill:" + c + ";stroke:" + c : "fill:none;stroke:var(--muted)") + ';stroke-width:2"/>');
-        out.push(t(col[1] - col[2] * 14, y, label, col[2] < 0 ? "start" : "end",
-          "fill:" + (users.length ? "var(--ink)" : "var(--muted)") + ";font-size:11px;font-family:ui-monospace,Consolas,monospace"));
-        if (!users.length) return;
-        var text = users.map(function (u) { return u.g.short + " " + u.t; }).join(", ");
-        out.push('<line x1="' + (col[1] + col[2] * 10) + '" y1="' + y + '" x2="' + (col[1] + col[2] * 26) + '" y2="' + y +
-          '" style="stroke:' + c + ';stroke-width:2"/>');
-        out.push(t(col[1] + col[2] * 30, y, text, col[2] < 0 ? "end" : "start", "fill:" + c + ";font-size:12px;font-weight:600"));
+        var y = espY(i), users = pinUsers(label), c = users.length ? users[0].g.color : "";
+        var tip = (/^\d+$/.test(label) ? "GPIO" : "") + label + (users.length ? ": " + users.map(function (u) { return u.g.short + " " + u.t; }).join(", ") : ": 사용 안 함");
+        out.push("<g><title>" + tip + '</title><circle cx="' + X(col[1]) + '" cy="' + Y(y) + '" r="6.5" style="' +
+          (c ? "fill:" + c + ";stroke:#fff" : "fill:#1d5b3a;stroke:" + GOLD) + ';stroke-width:1.5"/></g>');
+        out.push(t(X(col[2]), Y(y), label, col[3], halo + "fill:" + (users.length ? "#fff" : DIM) + ";font-size:9px;font-family:ui-monospace,Consolas,monospace"));
       });
     });
+
+    // outside: servo blocks (left LF/LH, right RF/RH) and the battery
+    var wire = function (x1, y1, x2, y2, c) {
+      var mx = (x1 + x2) / 2;
+      return '<path d="M' + x1 + " " + y1 + " C" + mx + " " + y1 + " " + mx + " " + y2 + " " + x2 + " " + y2 + '" style="fill:none;stroke:' + c + ';stroke-width:2;stroke-dasharray:5 4"/>';
+    };
+    var JOINT = { ALPHA: "어깨", BETA: "윗다리", GAMMA: "무릎" };
+    var block = function (id, bx, by, w, rowsMm, edgeX) {
+      var g = pinGroup(id), h = 30 + g.pins.length * 22, o = [];
+      o.push('<rect x="' + bx + '" y="' + by + '" width="' + w + '" height="' + h + '" rx="8" style="fill:var(--card);stroke:' + g.color + ';stroke-width:1.5"/>');
+      o.push(t(bx + 10, by + 15, g.name.replace(" ×3", ""), "start", "fill:" + g.color + ";font-size:12px;font-weight:700"));
+      g.pins.forEach(function (p, i) {
+        var ry = by + 37 + i * 22, lab = g.hdr[i].split(" ").pop() + " · GPIO" + p[1];
+        o.push(t(bx + 10, ry, p[0] + " (" + JOINT[p[0]] + ")", "start", "fill:var(--ink);font-size:11px"));
+        o.push('<rect x="' + (bx + w - 96) + '" y="' + (ry - 8) + '" width="88" height="16" rx="8" style="fill:' + g.color + '"/>');
+        o.push(t(bx + w - 52, ry + 0.5, lab, "middle", "fill:#fff;font-size:10px;font-weight:700;font-family:ui-monospace,Consolas,monospace"));
+      });
+      var cy = by + h / 2, ty = (Y(rowsMm[0]) + Y(rowsMm[1])) / 2;
+      o.push(wire(edgeX < X0 + 25 * S ? bx + w : bx, cy, edgeX, ty, g.color));
+      return o.join("");
+    };
+    out.push(block("LF", 15, 170, 215, [espY(7), espY(9)], X(0) + 4));
+    out.push(block("LH", 15, 330, 215, [espY(10), espY(12)], X(0) + 4));
+    out.push(block("RF", 670, 165, 215, [espY(6), espY(9)], X(50) - 4));
+    out.push(block("RH", 670, 330, 215, [espY(10), espY(12)], X(50) - 4));
+    out.push('<rect x="670" y="510" width="215" height="74" rx="8" style="fill:var(--card);stroke:' + PLUS + ';stroke-width:1.5"/>' +
+      t(680, 525, "배터리 2×18650", "start", "fill:" + PLUS + ";font-size:12px;font-weight:700") +
+      t(680, 547, "+ → 스위치(기판 밖) → J1 +", "start", "fill:var(--ink);font-size:11px") +
+      t(680, 569, "- → J1 -", "start", "fill:var(--ink);font-size:11px") +
+      wire(670, 547, X(41.3) + 6, Y(66.5), PLUS));
     return out.join("");
   }
   function renderPins() {
     $("pinCard").hidden = nested;      // the outer local page already shows this card
     $("pinBody").innerHTML = PINMAP.map(function (g) {
       return '<tr><td><span class="sw" style="background:' + g.color + '"></span>' + g.name + "</td><td>" + g.term +
-        '</td><td class="pn">' + g.pins.map(pinText).join("<br>") + "</td><td>" + g.note + "</td></tr>";
+        '</td><td style="white-space:nowrap">' + g.hdr.join("<br>") + '</td><td class="pn">' + g.pins.map(pinText).join("<br>") + "</td><td>" + g.note + "</td></tr>";
     }).join("");
     $("pinLegend").innerHTML = PINMAP.map(function (g) {
       return '<span><span class="sw" style="background:' + g.color + '"></span>' + g.short + "</span>";
     }).join("");
     $("pinSvg").innerHTML = pinSvg();
     $("pinNote").textContent = SERVO_NOTE + ". 핀 값은 펌웨어 기본값이며 로봇에서 읽어 온 값이 아닙니다 " +
-      "(시험용 PIN LF GAMMA 명령으로 바꾼 핀은 반영되지 않음). 보드 핀 배열은 일반 ESP32 DevKit V1 30핀 기준이니 실물 실크 인쇄와 맞는지 확인하세요. " +
+      "(시험용 PIN LF GAMMA 명령으로 바꾼 핀은 반영되지 않음). 그림은 메인 보드 설계(hardware/pcb/out/robotdog_main_top.png)를 위에서 본 모습이고, " +
+      "회로는 회로도.jpg와 같아서 기판 없이 배선해도 핀 번호는 같습니다. 모듈 치수·핀 순서(Mini360·INA219·ESP32)는 실물로 확인 전입니다. " +
       "자세한 배선: hardware/pcb/README.md";
   }
   renderPins();
