@@ -346,9 +346,10 @@ input{font:inherit;border:1px solid var(--line);border-radius:10px;background:va
   var canSwitch = onGateway || isFile;
   var framed = false;        // this page is shown inside the local page's Wi-Fi frame
   try { framed = !!window.top && window.top !== window.self; } catch (e) { framed = true; }
-  // Only the robot-served copy inside a local page's Wi-Fi frame hides its own cards. A local or hosted copy
-  // inside another page (the robot hub) keeps them, since nothing outside shows them.
-  var nested = framed && !isFile;
+  // Only the robot-served copy inside a local page's Wi-Fi frame hides its own cards. A local, hosted or
+  // localhost copy inside another page (the robot hub, also the hub's local server start_hub.bat) keeps them,
+  // since nothing outside shows them.
+  var nested = framed && !isFile && !onGateway;
   var conn = { mode: onGateway ? "usb" : isFile ? "off" : "hot", host: "" };   // host: Wi-Fi target (local pages only)
   var apiBase = "";          // "" = same origin as the page (relative URLs)
   var connGen = 0, pollCtrl = null, addrEdited = false, lastStaIp = "", cmdBusy = 0;

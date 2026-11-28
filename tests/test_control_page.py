@@ -429,6 +429,7 @@ class DirectSerialTests(unittest.TestCase):
         cls.f = run("file")
         cls.noserial = run("file-noserial")
         cls.framed = run("framed")
+        cls.hub = run("hub")
 
     def test_initial_pose_is_drawn_before_connecting(self):
         v = self.f["initial"]
@@ -562,6 +563,11 @@ class DirectSerialTests(unittest.TestCase):
     def test_robot_page_inside_the_frame_hides_its_own_connection_card(self):
         self.assertTrue(self.framed["connCardHidden"])
         self.assertEqual(self.framed["armed"], "활성 (이 페이지)")
+
+    def test_local_hub_frame_keeps_connection_and_pin_cards(self):
+        # start_hub.bat: hub/serve.py (localhost:8800) frames this page; nothing outside shows these cards
+        self.assertFalse(self.hub["connCardHidden"])
+        self.assertFalse(self.hub["pinCardHidden"])
 
     def test_serial_code_keeps_the_gateway_safety_rules(self):
         page = PAGE.read_text(encoding="utf-8")

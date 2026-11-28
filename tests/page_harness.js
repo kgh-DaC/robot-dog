@@ -1,7 +1,7 @@
 // Runs the control page script (robot_control_web/index.html) in a fake
 // browser: fake DOM, fake clock/timers and a scripted fetch. Prints a JSON
 // report for tests/test_control_page.py.
-// Usage: node page_harness.js <index.html> [gateway|file|file-noserial|framed]
+// Usage: node page_harness.js <index.html> [gateway|file|file-noserial|framed|hub]
 //   default: page served by the robot; "gateway": page served by the USB
 //   gateway (http://127.0.0.1:8787), connection mode switching; "file": page
 //   opened from disk (file://) with a fake Web Serial port and fake firmware;
@@ -197,7 +197,13 @@ if (MODE === "file" || MODE === "file-noserial") {
     getPorts: async () => (fw.granted ? [fakePort] : []),
     requestPort: async () => { fw.requestCount++; return fakePort; } } } : {};
 }
-if (MODE === "framed") { context.window.top = {}; context.window.self = context.window; }
+if (MODE === "framed" || MODE === "hub") { context.window.top = {}; context.window.self = context.window; }
+// "hub": the local robot hub (start_hub.bat, hub/serve.py on localhost:8800) shows this page in its frame.
+if (MODE === "hub") {
+  const ls = {};
+  context.location = { protocol: "http:", host: "localhost:8800" };
+  context.window.localStorage = { getItem: (k) => (k in ls ? ls[k] : null), setItem: (k, v) => { ls[k] = String(v); } };
+}
 context.AbortController = context.window.AbortController;  // window is the global in a browser
 vm.createContext(context);
 
@@ -286,7 +292,7 @@ if (MODE === "gateway") (async () => {
   process.stdout.write(JSON.stringify(g));
 })();
 
-if (MODE === "framed") (async () => {
+if (MODE === "framed" || MODE === "hub") (async () => {
   vm.runInContext(script, context);
   await advance(600);
   process.stdout.write(JSON.stringify({ connCardHidden: el("connCard").hidden, pinCardHidden: el("pinCard").hidden, armed: el("sArmed").textContent }));
