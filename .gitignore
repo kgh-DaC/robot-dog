@@ -7,3 +7,9 @@ esp32-robot-dog-code-master/tools/servoInitPose/build/
 .claude/ralph-loop.local.md
 .claude/.ralph-loop.local.md
 .claude/settings.local.json
+
+# 메인 펌웨어 빌드 산출물(arduino-cli)
+esp32-robot-dog-code-master/software/robot_dog_esp32/build/
+# 도구·시험 임시 파일
+node_modules/
+_workspace/qa_tmp/
